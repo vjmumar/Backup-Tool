@@ -14,8 +14,8 @@
  *     PUT  <session URI>  with the raw ReadableStream body
  */
 
-const CLIENT_ID = "565945392484-u4fktod13ru0guk5sdi96v1ap7tnjv9f.apps.googleusercontent.com";
-const CLIENT_SECRET = "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";
+// const CLIENT_ID = "565945392484-u4fktod13ru0guk5sdi96v1ap7tnjv9f.apps.googleusercontent.com";
+// const CLIENT_SECRET = "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";
 const SCOPES = "https://www.googleapis.com/auth/drive.file";
 const TOKEN_URL = "https://oauth2.googleapis.com/token";
 const DRIVE_API = "https://www.googleapis.com/drive/v3";
