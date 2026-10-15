@@ -1,0 +1,26 @@
+{
+  "manifest_version": 3,
+  "name": "Course Backup",
+  "version": "0.3.0",
+  "description": "Backs up Kajabi courses to Google Drive.",
+  "host_permissions": [
+    "https://*.kajabi-cdn.com/*",
+    "https://*.amazonaws.com/*",
+    "https://*.kajabi.com/*"
+  ],
+  "permissions": ["storage", "identity", "downloads"],
+  "background": { "service_worker": "src/background/background.js", "type": "module" },
+  "content_scripts": [
+    {
+      "matches": ["https://app.kajabi.com/admin/*"],
+      "js": ["src/scraper/scraper.js", "src/content/ui.js", "src/content/content.js"],
+      "run_at": "document_idle",
+      "world": "MAIN"
+    },
+    {
+      "matches": ["https://app.kajabi.com/admin/*"],
+      "js": ["src/content/bridge.js"],
+      "run_at": "document_start"
+    }
+  ]
+}

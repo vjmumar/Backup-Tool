@@ -1,0 +1,161 @@
+<!doctype html>
+<html lang="en">
+   <head>
+      <meta charset="utf-8" />
+      <meta name="viewport" content="width=device-width, initial-scale=1" />
+      <title>Course Backup</title>
+      <link rel="stylesheet" href="dashboard.css" />
+   </head>
+   <body>
+      <header class="top">
+         <div class="in">
+            <div class="top-row">
+               <div class="top-left">
+                  <div class="top-logo">
+                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+                  </div>
+                  <div class="top-meta">
+                     <h1>Course Backup</h1>
+                     <p id="sub">Loading...</p>
+                  </div>
+               </div>
+               <div class="top-actions" id="top-actions"></div>
+            </div>
+         </div>
+      </header>
+      <main class="wrap">
+         <div class="folder-name-row">
+            <label class="folder-name-label" for="root-folder">
+               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
+               Backup folder name
+            </label>
+            <input type="text" id="root-folder" class="folder-name-input" value="Kajabi Backup" spellcheck="false" autocomplete="off" />
+            <span class="folder-name-hint">Files will be saved inside this folder</span>
+         </div>
+         <div id="tree"></div>
+      </main>
+      <footer class="bottom" id="bottom" hidden>
+         <div class="in" id="bottom-in"></div>
+      </footer>
+
+      <!-- Setup modal — shown when user picks Local backup, explains the Chrome setting -->
+      <div class="scrim" id="setup-scrim" hidden>
+         <div class="picker" role="dialog" aria-modal="true" aria-labelledby="setup-title" style="max-width:520px">
+            <div class="picker-head">
+               <h2 id="setup-title">One-time setup for local backup</h2>
+               <button class="picker-close" id="setup-close" aria-label="Close">
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 6l12 12M18 6 6 18"/></svg>
+               </button>
+            </div>
+            <div class="setup-body">
+               <p class="setup-why">
+                  ⚠️ <strong>Hi! Before You Start the Backup</strong>
+               </p>
+               <p class="setup-why">
+                  Chrome may ask <strong>"Where do you want to save this file?"</strong> for every single download, which could result in hundreds of confirmation dialogs.
+               </p>
+               <p class="setup-why">
+                  To avoid this, please <strong>temporarily turn off Chrome's "Ask where to save each file before downloading" setting.</strong> This will allow all files to download automatically into your <strong>Downloads/Kajabi Backup/</strong> folder without requiring confirmation for each file.
+               </p>
+               <p class="setup-why">
+                  Once the backup is complete, you can turn this setting back on.
+               </p>
+               <ol class="setup-steps">
+                  <li>
+                     <span class="step-num">1</span>
+                     <div>
+                        Click the button below to open Chrome's download settings<br>
+                        <button class="btn primary setup-open-btn" id="setup-open-settings">Open Chrome download settings</button>
+                     </div>
+                  </li>
+                  <li>
+                     <span class="step-num">2</span>
+                     <div>Find the toggle labelled <strong>"Ask where to save each file before downloading"</strong> and turn it <strong>off</strong>.</div>
+                  </li>
+                  <li>
+                     <span class="step-num">3</span>
+                     <div>Come back to this tab and click <strong>"Done, start downloading"</strong>.</div>
+                  </li>
+               </ol>
+               <p class="setup-note">You can re-enable the setting in Chrome after the backup finishes.</p>
+            </div>
+            <div class="setup-foot">
+               <button class="btn" id="setup-cancel">Cancel</button>
+               <button class="btn primary" id="setup-confirm">Done, start downloading</button>
+            </div>
+         </div>
+      </div>
+
+      <!-- Destination picker modal — hidden until "Start backup" is clicked -->
+      <div class="scrim" id="dest-scrim" hidden>
+         <div class="picker" role="dialog" aria-modal="true" aria-labelledby="dest-title">
+            <div class="picker-head">
+               <h2 id="dest-title">Where do you want to save?</h2>
+               <button class="picker-close" id="dest-close" aria-label="Close">
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 6l12 12M18 6 6 18"/></svg>
+               </button>
+            </div>
+            <div class="picker-body">
+               <!-- Local backup -->
+               <button class="dest" id="dest-local">
+                  <div class="dest-ico">
+                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/></svg>
+                  </div>
+                  <strong>Local backup</strong>
+                  <span>Save files directly to your Downloads folder</span>
+               </button>
+               <!-- Google Drive -->
+               <button class="dest" id="dest-drive">
+                  <div class="dest-ico">
+                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2 2 19.5h20L12 2z"/><path d="M2 19.5 8.5 8 15 19.5"/><path d="M15 19.5 9 8.5 22 19.5"/></svg>
+                  </div>
+                  <strong>Google Drive</strong>
+                  <span>Upload to your Drive folder</span>
+               </button>
+            </div>
+            <p class="dest-note">⏱ Google Drive uploads are slower than local — each file is streamed through the extension one at a time.</p>
+         </div>
+      </div>
+
+      <!-- Google Drive modal — warning + account choice -->
+      <div class="scrim" id="drive-scrim" hidden>
+         <div class="picker" role="dialog" aria-modal="true" aria-labelledby="drive-modal-title" style="max-width:480px">
+            <div class="picker-head">
+               <h2 id="drive-modal-title">Back up to Google Drive</h2>
+               <button class="picker-close" id="drive-close" aria-label="Close">
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 6l12 12M18 6 6 18"/></svg>
+               </button>
+            </div>
+            <div class="drive-modal-body">
+               <div class="drive-warn-box">
+                  <svg class="drive-warn-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+                  <div>
+                     <strong>This will be slower than a local backup</strong>
+                     <p>Each file is fetched and streamed to Drive one at a time through the extension. Large courses may take a while.</p>
+                  </div>
+               </div>
+               <div class="drive-account" id="drive-account-row" hidden>
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="4"/><path d="M4 20c0-4 3.6-7 8-7s8 3 8 7"/></svg>
+                  <div>
+                     <span class="drive-account-label">Signed in as</span>
+                     <span class="drive-account-email" id="drive-account-email"></span>
+                  </div>
+               </div>
+               <div id="drive-storage-row"></div>
+            </div>
+            <div class="drive-modal-foot">
+               <button class="btn" id="drive-switch-account">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/></svg>
+                  Sign in with a different account
+               </button>
+               <button class="btn primary" id="drive-continue">Continue</button>
+            </div>
+         </div>
+      </div>
+
+      <script src="backup/orchestrator.js"></script>
+      <script src="backup/local.js"></script>
+      <script src="backup/drive-backup.js"></script>
+      <script src="dashboard.js"></script>
+   </body>
+</html>
