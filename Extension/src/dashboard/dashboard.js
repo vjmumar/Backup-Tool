@@ -1,9 +1,22 @@
 /**
  * CourseDashboard — dashboard.js
- * Reads the scan the background saved into IndexedDB,
- * draws the course tree with checkboxes, measures every file size,
- * and shows the sizes live in the rows and in the bottom bar.
+ *
+ * Reads the scan the background saved into IndexedDB, draws the course tree
+ * with checkboxes, measures every file size, and shows the sizes live in the
+ * rows and in the bottom bar.
+ *
+ * Data responsibilities:
+ *   "scan" store    — raw course objects, immutable after scrape. Never written
+ *                     back by the dashboard. File objects carry stable fileIds.
+ *   "sizes" store   — file size cache, keyed by fileId. Written once per file
+ *                     during measuring. Cleared on fresh scrape.
+ *   this.fileStatus — Map<fileId, "downloading"|"done"|"failed">. Persisted to
+ *                     localStorage so a page reload resumes where it left off.
+ *                     Cleared on new scrape or when a new backup run starts.
  */
+
+const LS_KEY = "courseBackup_fileStatus";
+const LS_DEST_KEY = "courseBackup_destination";
 
 class CourseDashboard {
    constructor() {
@@ -16,10 +29,6 @@ class CourseDashboard {
       this.plural = (n, one, many) => `${n} ${n === 1 ? one : many}`;
       this.chevron = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6"/></svg>';
 
-      // Then, sizing state — sizes: Map<key, bytes|null>  (absent = pending)
-      this.sizes = new Map();
-      this.wanted = new Map();
-
       // Then, tree state
       this.model = [];
       this.empties = new Set();
@@ -29,10 +38,18 @@ class CourseDashboard {
       // Then, rAF handle for throttled redraws
       this.rafId = 0;
 
-      // Then, per-lesson backup status (null when no backup is running)
-      this.backupStatus = null;  // Map<lessonId, "done"|"failed"> | null
-      this.backupCurrent = null;  // lessonId currently downloading, or null
-      this._activeBackup = null;  // current LocalBackup/DriveBackup instance, for cancel()
+      // Then, download status — in memory only, never written to IndexedDB
+      // Map<fileId, "downloading"|"done"|"failed">
+      this.fileStatus = new Map();
+
+      // Then, backup state
+      this._backupRunning = false;
+      this.backupActiveLessonId = null;
+      this._activeBackup = null;
+
+      // Then, measuring state (for bottom bar progress note)
+      this._measureTotal = 0;
+      this._measureDone = 0;
 
       // Finally, start
       this._start();
@@ -41,25 +58,23 @@ class CourseDashboard {
    // ─── DATABASE ────────────────────────────────────────────────────────────────
 
    /**
-    * Opens the shared IndexedDB database — the same one the background writes to.
-    * The promise is cached so it is only opened once.
+    * Opens the shared IndexedDB database.
+    * Version 5: scan + meta + sizes stores. "backup" store deleted on upgrade.
     */
    _openDb = () =>
    (this._dbPromise ||= new Promise((resolve, reject) => {
-      const request = indexedDB.open("course-backup", 2);
-      // First, create the three stores if they do not exist yet
-      request.onupgradeneeded = () => {
-         ["sizes", "scan", "meta"].forEach((name) =>
-            request.result.objectStoreNames.contains(name) || request.result.createObjectStore(name)
-         );
+      const request = indexedDB.open("course-backup", 5);
+      request.onupgradeneeded = (e) => {
+         const db = e.target.result;
+         if (!db.objectStoreNames.contains("scan")) db.createObjectStore("scan");
+         if (!db.objectStoreNames.contains("meta")) db.createObjectStore("meta");
+         if (!db.objectStoreNames.contains("sizes")) db.createObjectStore("sizes");
+         if (db.objectStoreNames.contains("backup")) db.deleteObjectStore("backup");
       };
       request.onsuccess = () => resolve(request.result);
       request.onerror = () => reject(request.error);
    }));
 
-   /**
-    * This method is responsible for running a read request on a store.
-    */
    _dbRead = async (store, action) => {
       const db = await this._openDb();
       return new Promise((resolve) => {
@@ -71,9 +86,74 @@ class CourseDashboard {
 
    _dbGet = (store, key) => this._dbRead(store, (s) => s.get(key));
    _dbAll = (store) => this._dbRead(store, (s) => s.getAll());
-   _dbSet = async (store, key, value) => {
-      const db = await this._openDb();
-      db.transaction(store, "readwrite").objectStore(store).put(value, key);
+
+   /** Fire-and-forget write — used only for the sizes store during measuring. */
+   _dbSet = (store, key, value) => {
+      this._openDb().then((db) => {
+         db.transaction(store, "readwrite").objectStore(store).put(value, key);
+      }).catch((err) => console.warn("[db] _dbSet failed:", store, key, err));
+   };
+
+   // ─── FILE INDEX ──────────────────────────────────────────────────────────────
+
+   /**
+    * Persists fileStatus + the current scan's savedAt to localStorage.
+    * savedAt is used on reload to detect stale data from a previous scrape.
+    */
+   _saveFileStatus = () => {
+      try {
+         localStorage.setItem(LS_KEY, JSON.stringify({
+            savedAt: this._scanSavedAt,
+            entries: [...this.fileStatus.entries()],
+         }));
+      } catch (_) { }
+   };
+
+   /**
+    * Loads persisted fileStatus from localStorage.
+    * Discards the data if the savedAt doesn't match the current scan's savedAt
+    * — that means the user re-scraped and this data is from an old session.
+    */
+   _loadFileStatus = () => {
+      try {
+         const raw = localStorage.getItem(LS_KEY);
+         if (!raw) return;
+         const data = JSON.parse(raw);
+         if (!data || !Array.isArray(data.entries)) return;
+         // Stale check — savedAt must match the current scan
+         if (data.savedAt !== this._scanSavedAt) {
+            console.log("[loadFileStatus] stale — stored savedAt:", data.savedAt, "current:", this._scanSavedAt);
+            localStorage.removeItem(LS_KEY);
+            localStorage.removeItem(LS_DEST_KEY);
+            return;
+         }
+         data.entries.forEach(([fileId, status]) => {
+            if (this._fileIndex?.has(fileId)) {
+               this.fileStatus.set(fileId, status === "downloading" ? "failed" : status);
+            }
+         });
+         console.log("[loadFileStatus] restored", this.fileStatus.size, "entries. sample:", [...this.fileStatus.entries()].slice(0, 3));
+         // Persist the cleaned-up statuses (downloading → failed) back to localStorage
+         this._saveFileStatus();
+      } catch (_) { }
+   };
+
+   /**
+    * Builds Map<fileId, { file, courseIndex }> for O(1) lookup by fileId.
+    * Called once from _buildModel after the model is constructed.
+    */
+   _buildFileIndex = () => {
+      this._fileIndex = new Map();
+      this.model.forEach(({ course }, courseIndex) => {
+         const register = (files) => (files || []).forEach((file) => {
+            if (file.fileId) this._fileIndex.set(file.fileId, { file, courseIndex });
+         });
+         register(course.files);
+         course.categories.forEach((cat) => {
+            register(cat.files);
+            (cat.posts || []).forEach((post) => register(post.files));
+         });
+      });
    };
 
    // ─── MEASURING ───────────────────────────────────────────────────────────────
@@ -103,62 +183,94 @@ class CourseDashboard {
       return null;
    };
 
-   _collectFiles = (courses) => {
-      const map = new Map();
-      const add = (files) => (files || []).forEach((file) => {
-         const key = this._keyOf(file.url);
-         if (!map.has(key)) map.set(key, file.url);
+   /**
+    * Groups file objects by url-without-qs so one network request covers all
+    * files sharing the same URL. Returns { todo, total, alreadyDone }.
+    * "Already done" means at least one fileId in the group has a size in the
+    * sizes store (loaded into file.size during _start).
+    */
+   _collectMeasureWork = () => {
+      const byUrl = new Map();
+      const visit = (files) => (files || []).forEach((file) => {
+         if (!file.url || !file.fileId) return;
+         const key = file.url.split("?")[0];
+         if (!byUrl.has(key)) byUrl.set(key, { url: file.url, fileIds: [], alreadySized: true });
+         byUrl.get(key).fileIds.push(file.fileId);
+         // If any file with this url is unsized, the whole group needs measuring
+         if (file.size === undefined) byUrl.get(key).alreadySized = false;
       });
-      courses.forEach((course) => {
-         add(course.files);
-         course.categories.forEach((category) => {
-            add(category.files);
-            (category.posts || []).forEach((post) => add(post.files));
+      this.model.forEach(({ course }) => {
+         visit(course.files);
+         course.categories.forEach((cat) => {
+            visit(cat.files);
+            (cat.posts || []).forEach((post) => visit(post.files));
          });
       });
-      return map;
+
+      const todo = [];
+      let alreadyDone = 0;
+      for (const entry of byUrl.values()) {
+         if (entry.alreadySized) alreadyDone++;
+         else todo.push(entry);
+      }
+      return { todo, total: byUrl.size, alreadyDone };
    };
 
-   _measureAll = async (courses) => {
-      this.wanted = this._collectFiles(courses);
-      const todo = [];
-      // First, load cache hits before starting any requests
-      for (const [key, url] of this.wanted) {
-         const cached = await this._dbGet("sizes", key);
-         if (cached != null) this.sizes.set(key, cached);
-         else todo.push({ key, url });
-      }
+   /**
+    * Loads cached sizes from the "sizes" store into file objects, then measures
+    * any remaining files via HTTP Range requests.
+    * Sizes are written to the "sizes" store (keyed by fileId) and stamped onto
+    * file.size in memory. The "scan" store is never written by this method.
+    */
+   _measureAll = async () => {
+      // First, load cached sizes from the sizes store into file objects
+      this.model.forEach(({ course }) => {
+         const load = (files) => (files || []).forEach(async (file) => {
+            if (!file.fileId || file.size !== undefined) return;
+            const cached = await this._dbGet("sizes", file.fileId);
+            if (cached !== undefined) {
+               file.size = cached;
+               this._measureDone++;
+               this._schedule();
+            }
+         });
+         load(course.files);
+         course.categories.forEach((cat) => {
+            load(cat.files);
+            (cat.posts || []).forEach((post) => load(post.files));
+         });
+      });
+
+      // Then, collect what still needs measuring after cache load
+      // Small delay to let async cache loads settle before counting
+      await new Promise((r) => setTimeout(r, 50));
+
+      const { todo, total, alreadyDone } = this._collectMeasureWork();
+      this._measureTotal = total;
+      this._measureDone = alreadyDone;
       this._schedule();
+
       let next = 0;
       const worker = async () => {
          while (next < todo.length) {
-            const { key, url } = todo[next++];
+            const { url, fileIds } = todo[next++];
             const size = await this._getFileSize(url);
-            if (size != null) this._dbSet("sizes", key, size);
-            this.sizes.set(key, size);
+            const val = size ?? null;
+            // Stamp size on all file objects sharing this url and write to sizes store
+            fileIds.forEach((id) => {
+               const entry = this._fileIndex?.get(id);
+               if (entry) entry.file.size = val;
+               this._dbSet("sizes", id, val);
+            });
+            this._measureDone++;
             this._schedule();
          }
       };
-      // Run 6 workers in parallel and wait for all to finish
       await Promise.all(Array.from({ length: 6 }, worker));
       this._schedule();
    };
 
    // ─── SIZE HELPERS ────────────────────────────────────────────────────────────
-
-   _keyOf = (url) => url.split("?")[0];
-   _textBytes = (text) => ({ bytes: new Blob([text || ""]).size, pending: 0, unknown: 0 });
-   _addStat = (a, b) => ({ bytes: a.bytes + b.bytes, pending: a.pending + b.pending, unknown: a.unknown + b.unknown });
-   _empty = () => ({ bytes: 0, pending: 0, unknown: 0 });
-
-   _sumFiles = (files = []) =>
-      files.reduce((total, file) => {
-         const key = this._keyOf(file.url);
-         if (!this.sizes.has(key)) total.pending++;
-         else if (this.sizes.get(key) === null) total.unknown++;
-         else total.bytes += this.sizes.get(key);
-         return total;
-      }, { bytes: 0, pending: 0, unknown: 0 });
 
    _format = (bytes) => {
       const units = ["B", "KB", "MB", "GB", "TB"];
@@ -166,6 +278,20 @@ class CourseDashboard {
       while (n >= 1024 && i < units.length - 1) { n /= 1024; i++; }
       return `${i === 0 || n >= 100 ? Math.round(n) : n.toFixed(1)} ${units[i]}`;
    };
+
+   /** Reads file.size — undefined = pending, null = unknown, number = known. */
+   _sumFiles = (files = []) =>
+      files.reduce((total, file) => {
+         if (!file.url) return total;
+         if (file.size === undefined) total.pending++;
+         else if (file.size === null) total.unknown++;
+         else total.bytes += file.size;
+         return total;
+      }, { bytes: 0, pending: 0, unknown: 0 });
+
+   _textBytes = (text) => ({ bytes: new Blob([text || ""]).size, pending: 0, unknown: 0 });
+   _addStat = (a, b) => ({ bytes: a.bytes + b.bytes, pending: a.pending + b.pending, unknown: a.unknown + b.unknown });
+   _empty = () => ({ bytes: 0, pending: 0, unknown: 0 });
 
    _sizeHtml = (stat) =>
       stat.pending
@@ -176,11 +302,9 @@ class CourseDashboard {
 
    _buildModel = (courses) => {
       this.model = courses.map((course) => ({
-         // First, use the stable id stamped by addIds() in content.js
          id: course.id,
          course,
          categories: course.categories.map((category) => {
-            // Then, track empty categories by their stable emptyId
             if (category.emptyId) this.empties.add(category.emptyId);
             return {
                id: category.id,
@@ -192,6 +316,7 @@ class CourseDashboard {
       }));
       this.selected = new Set(this.model.flatMap((c) => this._courseUnits(c)));
       if (this.model.length) this.open.add(this.model[0].id);
+      this._buildFileIndex();
    };
 
    _catUnits = (k) => k.emptyId ? [k.emptyId] : k.lessons.map((l) => l.id);
@@ -204,8 +329,8 @@ class CourseDashboard {
    // ─── SIZE STATS ──────────────────────────────────────────────────────────────
 
    _lessonStat = (l) => this._addStat(this._sumFiles(l.post.files), this._textBytes(l.post.body));
-   _categoryStat = (k) => k.lessons.reduce((total, l) => this._addStat(total, this._lessonStat(l)), this._sumFiles(k.category.files));
-   _courseStat = (c) => c.categories.reduce((total, k) => this._addStat(total, this._categoryStat(k)), this._sumFiles(c.course.files));
+   _categoryStat = (k) => k.lessons.reduce((t, l) => this._addStat(t, this._lessonStat(l)), this._sumFiles(k.category.files));
+   _courseStat = (c) => c.categories.reduce((t, k) => this._addStat(t, this._categoryStat(k)), this._sumFiles(c.course.files));
 
    _selectionStat = () => {
       let total = this._empty();
@@ -243,20 +368,40 @@ class CourseDashboard {
    _chevHtml = (id) => `<button class="chev" data-toggle="${id}" aria-expanded="${this.open.has(id)}" aria-label="${this.open.has(id) ? "Collapse" : "Expand"}">${this.chevron}</button>`;
    _checkHtml = (ids, label) => `<label class="chk"><input type="checkbox" data-ids="${this.esc(ids.join(","))}" data-state="${this._stateOf(ids)}"><span class="ct">${this.esc(label)}</span></label>`;
 
+   /**
+    * Derives lesson-level download status from this.fileStatus.
+    * "done"    — all CDN files in the lesson are done
+    * "failed"  — any CDN file failed
+    * "downloading" — any CDN file is currently downloading
+    * undefined — no status yet
+    */
+   _lessonDownloadStatus = (post) => {
+      const cdnFiles = (post.files || []).filter((f) => f.url && f.fileId);
+      if (!cdnFiles.length) return undefined;
+      const statuses = cdnFiles.map((f) => this.fileStatus.get(f.fileId));
+      if (statuses.some((s) => s === "downloading")) return "downloading";
+      if (statuses.some((s) => s === "failed")) return "failed";
+      if (statuses.every((s) => s === "done")) return "done";
+      return undefined;
+   };
+
    _lessonHtml = (l) => {
-      // First, check backup status for this lesson using its unique ID
-      const status = this.backupStatus?.get(l.id);
-      const isActive = this.backupCurrent === l.id;
+      const lessonStatus = this._lessonDownloadStatus(l.post);
+      const isActive = this.backupActiveLessonId === l.id;
 
-      // Then, build the status badge
       let badge = "";
-      if (isActive) badge = '<span class="tag bk-active">Downloading…</span>';
-      else if (status === "done") badge = '<span class="tag bk-done">✓ Saved</span>';
-      else if (status === "skipped") badge = '<span class="tag bk-skip">Skipped</span>';
+      if (isActive || lessonStatus === "downloading")
+         badge = '<span class="tag bk-active">Downloading…</span>';
+      else if (lessonStatus === "done")
+         badge = '<span class="tag bk-done">✓ Saved</span>';
+      else if (lessonStatus === "failed")
+         badge = '<span class="tag bk-fail">✗ Failed</span>';
 
-      // Finally, return the row
+      const rowClass = isActive || lessonStatus === "downloading" ? " bk-row"
+         : lessonStatus === "done" ? " bk-row-done" : "";
+
       return `
-      <div class="lesson${isActive ? " bk-row" : status === "done" ? " bk-row-done" : ""}">
+      <div class="lesson${rowClass}">
          ${this._checkHtml([l.id], l.post.title || "Untitled lesson")}
          ${this._tagsOf(l.post)}
          ${badge}
@@ -270,17 +415,15 @@ class CourseDashboard {
       const count = k.lessons.length
          ? `${picked ? picked + " of " : ""}${this.plural(k.lessons.length, "lesson", "lessons")}`
          : hasCatFiles ? "empty &middot; folder + thumbnail" : "empty &middot; folder only";
-      const szPart = k.lessons.length || (k.category.files || []).length
+      const szPart = k.lessons.length || hasCatFiles
          ? ` &middot; ${this._sizeHtml(this._categoryStat(k))}`
          : "";
 
-      // Glow when backup is running and every selected lesson in this category is done
-      // Also glow for empty categories when their placeholder file is done
       const selLessons = k.lessons.filter((l) => this.selected.has(l.id));
-      const catAllDone = this.backupStatus !== null && (
+      const catAllDone = this._backupRunning && (
          k.emptyId && this.selected.has(k.emptyId)
-            ? this.backupStatus.get(k.emptyId) === "done"
-            : selLessons.length > 0 && selLessons.every((l) => this.backupStatus.get(l.id) === "done")
+            ? (k.category.files || []).every((f) => f.fileId && this.fileStatus.get(f.fileId) === "done")
+            : selLessons.length > 0 && selLessons.every((l) => this._lessonDownloadStatus(l.post) === "done")
       );
 
       return `
@@ -298,10 +441,9 @@ class CourseDashboard {
       const picked = all.filter((l) => this.selected.has(l.id)).length;
       const count = `${this.plural(c.categories.length, "category", "categories")} &middot; ${picked ? picked + " of " : ""}${this.plural(all.length, "lesson", "lessons")}`;
 
-      // Glow when backup is running and every selected lesson in this course is done
       const selAll = all.filter((l) => this.selected.has(l.id));
-      const courseAllDone = this.backupStatus !== null && selAll.length > 0 &&
-         selAll.every((l) => this.backupStatus.get(l.id) === "done");
+      const courseAllDone = this._backupRunning && selAll.length > 0 &&
+         selAll.every((l) => this._lessonDownloadStatus(l.post) === "done");
 
       return `
       <div class="course${courseAllDone ? " bk-course-done" : ""}">
@@ -312,68 +454,71 @@ class CourseDashboard {
 
    // ─── DRAW ────────────────────────────────────────────────────────────────────
 
-   /**
-    * This method is responsible for redrawing the full tree and the bottom bar.
-    * The page scroll position, the open state and the selection are preserved.
-    */
    _draw = () => {
       const scrollY = window.scrollY;
 
-      // First, rebuild the tree HTML
       this.$("#tree").innerHTML = this.model.map((c) => this._courseHtml(c)).join("")
          || '<div class="state"><p>No courses found.</p></div>';
 
-      // Then, set indeterminate state — cannot be done in HTML
-      // Also disable all checkboxes and the folder name input while a backup is running
-      const backupRunning = this.backupStatus !== null;
       document.querySelectorAll("input[data-state]").forEach((input) => {
          input.checked = input.dataset.state === "all";
          input.indeterminate = input.dataset.state === "some";
-         input.disabled = backupRunning;
+         input.disabled = this._backupRunning;
       });
       const folderInput = this.$("#root-folder");
-      if (folderInput) folderInput.disabled = backupRunning;
+      if (folderInput) folderInput.disabled = this._backupRunning;
       window.scrollTo({ top: scrollY, behavior: "instant" });
 
-      // Then, skip the bottom bar update if a backup is running (it has its own bar)
-      if (this.backupStatus !== null) return;
+      if (this._backupRunning) return;
 
-      // Then, compute bottom bar values
       const lessons = [...this.selected].filter((i) => !this.empties.has(i)).length;
       const folders = this.selected.size - lessons;
       const stat = this._selectionStat();
-      const done = [...this.wanted.keys()].filter((key) => this.sizes.has(key)).length;
-      const measuring = done < this.wanted.size;
-      const unknown = [...this.wanted.keys()].filter((key) => this.sizes.get(key) === null).length;
+      const measuring = this._measureDone < this._measureTotal;
+      const unknownCount = (() => {
+         let n = 0;
+         this.model.forEach(({ course }) => {
+            const count = (files) => (files || []).forEach((f) => { if (f.url && f.size === null) n++; });
+            count(course.files);
+            course.categories.forEach((cat) => {
+               count(cat.files);
+               (cat.posts || []).forEach((post) => count(post.files));
+            });
+         });
+         return n;
+      })();
 
       const note = measuring
-         ? `Measuring sizes &middot; ${done} of ${this.wanted.size} files (${Math.round((done / this.wanted.size) * 100)}%)`
-         : unknown
-            ? `${this.plural(unknown, "file", "files")} could not be measured and ${unknown === 1 ? "is" : "are"} not counted. They are still backed up.`
+         ? `Measuring sizes &middot; ${this._measureDone} of ${this._measureTotal} files (${Math.round((this._measureDone / this._measureTotal) * 100)}%)`
+         : unknownCount
+            ? `${this.plural(unknownCount, "file", "files")} could not be measured and ${unknownCount === 1 ? "is" : "are"} not counted. They are still backed up.`
             : "All sizes measured.";
 
-      // Start backup button is enabled only when measuring is done and something is selected
       const canBackup = !measuring && lessons > 0;
-      // Finally, update the bottom bar
+      const hasStatus = this.fileStatus.size > 0;
+      const savedDest = (() => { try { return localStorage.getItem(LS_DEST_KEY); } catch (_) { return null; } })();
+      const btnLabel = hasStatus ? "Resume backup" : "Start backup";
       const sizeLabel = stat.pending
          ? `<span class="meas"></span>`
-         : `<span class="sum-size">${this._format(stat.bytes).replace(/\s/, '<em>')}B</em></span>`;
+         : `<span class="sum-size">${this._format(stat.bytes).replace(/\s/, "<em>")}B</em></span>`;
+
       this.$("#bottom-in").innerHTML = `
          <div class="sum">
             ${sizeLabel}
             <span class="sum-detail">${this.plural(lessons, "lesson", "lessons")} + ${this.plural(folders, "empty folder", "empty folders")} selected</span>
             <p class="muted small" style="margin-left:auto">${note}</p>
          </div>
-         <button class="btn primary" id="btn-backup" ${canBackup ? "" : "disabled"} title="${canBackup ? "Choose where to save" : "Waiting for sizes to finish measuring"}">Start backup</button>`;
+         <button class="btn primary" id="btn-backup" ${canBackup ? "" : "disabled"} title="${canBackup ? "Choose where to save" : "Waiting for sizes to finish measuring"}">${btnLabel}</button>`;
       if (canBackup) {
-         this.$("#btn-backup").addEventListener("click", () => this._showDestinationPicker());
+         this.$("#btn-backup").addEventListener("click", () => {
+            if (hasStatus && savedDest === "drive") this._onPickDrive();
+            else if (hasStatus && savedDest === "local") this._onPickLocal();
+            else this._showDestinationPicker();
+         });
       }
       this.$("#bottom").hidden = false;
    };
 
-   /**
-    * This method is responsible for scheduling a redraw at most once per animation frame.
-    */
    _schedule = () => {
       if (this.rafId) return;
       this.rafId = requestAnimationFrame(() => {
@@ -384,11 +529,7 @@ class CourseDashboard {
 
    // ─── EVENTS ──────────────────────────────────────────────────────────────────
 
-   /**
-    * This method is responsible for wiring up all click listeners on the page.
-    */
    _initEvents = () => {
-      // First, the tree: expand/collapse and checkbox changes
       this.$("#tree").addEventListener("click", (e) => {
          const toggle = e.target.closest("[data-toggle]");
          if (toggle) {
@@ -396,8 +537,7 @@ class CourseDashboard {
             this.open.has(id) ? this.open.delete(id) : this.open.add(id);
             return this._draw();
          }
-         // Block checkbox changes while a backup is running
-         if (this.backupStatus !== null) return;
+         if (this._backupRunning) return;
          const input = e.target.closest("input[data-ids]");
          if (input) {
             input.dataset.ids.split(",").forEach((i) =>
@@ -407,7 +547,6 @@ class CourseDashboard {
          }
       });
 
-      // Then, destination picker close targets
       this.$("#dest-close").addEventListener("click", () => this._hideDestinationPicker());
       this.$("#dest-scrim").addEventListener("click", (e) => {
          if (e.target === this.$("#dest-scrim")) this._hideDestinationPicker();
@@ -418,7 +557,6 @@ class CourseDashboard {
          if (e.key === "Escape" && !this.$("#drive-scrim").hidden) this._hideDriveModal();
       });
 
-      // Finally, destination cards
       this.$("#dest-local").addEventListener("click", () => {
          this._hideDestinationPicker();
          this._showSetupModal();
@@ -428,7 +566,6 @@ class CourseDashboard {
          this._showDriveModal();
       });
 
-      // Drive modal buttons
       this.$("#drive-close").addEventListener("click", () => this._hideDriveModal());
       this.$("#drive-scrim").addEventListener("click", (e) => {
          if (e.target === this.$("#drive-scrim")) this._hideDriveModal();
@@ -442,7 +579,6 @@ class CourseDashboard {
          await this._onPickDrive();
       });
 
-      // Then, setup modal buttons
       this.$("#setup-close").addEventListener("click", () => this._hideSetupModal());
       this.$("#setup-cancel").addEventListener("click", () => this._hideSetupModal());
       this.$("#setup-confirm").addEventListener("click", () => {
@@ -450,7 +586,6 @@ class CourseDashboard {
          this._onPickLocal();
       });
       this.$("#setup-open-settings").addEventListener("click", () => {
-         // chrome.tabs.create is not available here — open via background
          chrome.runtime.sendMessage({ type: "open-chrome-settings" });
       });
       this.$("#setup-scrim").addEventListener("click", (e) => {
@@ -462,17 +597,14 @@ class CourseDashboard {
 
    _showDestinationPicker = () => { this.$("#dest-scrim").hidden = false; };
    _hideDestinationPicker = () => { this.$("#dest-scrim").hidden = true; };
-
    _showSetupModal = () => { this.$("#setup-scrim").hidden = false; };
    _hideSetupModal = () => { this.$("#setup-scrim").hidden = true; };
 
    _showDriveModal = async () => {
-      // Show the modal immediately — populate details async
       this.$("#drive-scrim").hidden = false;
       const storageRow = this.$("#drive-storage-row");
       storageRow.innerHTML = "";
 
-      // Populate account row
       const state = await chrome.runtime.sendMessage({ type: "get-drive-state" });
       const accountRow = this.$("#drive-account-row");
       if (state?.connected && state.email) {
@@ -483,39 +615,35 @@ class CourseDashboard {
       }
       this.$("#drive-continue").textContent = state?.connected ? "Continue" : "Sign in & continue";
 
-      // Fetch storage quota only when already connected
       if (state?.connected) {
-         // Disable continue until quota is confirmed
          this.$("#drive-continue").disabled = true;
          this.$("#drive-continue").title = "Checking available storage…";
          storageRow.innerHTML = `<p class="drive-quota-warn muted">Checking available storage…</p>`;
 
-         const selStat = this._selectionStat();
-         const selBytes = selStat.bytes;
+         const selBytes = this._selectionStat().bytes;
 
          try {
             const quota = await chrome.runtime.sendMessage({ type: "get-drive-storage-quota" });
             if (!quota?.ok) throw new Error(quota?.error || "Quota check failed");
             const { limit, usage, free } = quota;
-            const DAILY_LIMIT = 750 * 1024 * 1024 * 1024; // 750 GB
+            const DAILY_LIMIT = 750 * 1024 * 1024 * 1024;
 
-            // Storage bar
             const usedPct = limit ? Math.min(100, Math.round((usage / limit) * 100)) : null;
             const selPct = (limit && selBytes) ? Math.min(100, Math.round((selBytes / limit) * 100)) : null;
             const overStorage = free != null && selBytes > 0 && selBytes > free;
             const overDaily = selBytes > DAILY_LIMIT;
 
             const barHtml = limit ? `
-                  <div class="drive-quota-bar-wrap">
-                     <div class="drive-quota-bar">
-                        <div class="drive-quota-used" style="width:${usedPct}%"></div>
-                        ${selPct ? `<div class="drive-quota-sel${overStorage ? " over" : ""}" style="width:${Math.min(selPct, 100 - usedPct)}%"></div>` : ""}
-                     </div>
-                     <div class="drive-quota-labels">
-                        <span>${this._format(usage)} used of ${this._format(limit)}</span>
-                        ${selBytes ? `<span class="drive-quota-sel-label${overStorage ? " bad" : ""}">${this._format(selBytes)} selected</span>` : ""}
-                     </div>
-                  </div>` : "";
+               <div class="drive-quota-bar-wrap">
+                  <div class="drive-quota-bar">
+                     <div class="drive-quota-used" style="width:${usedPct}%"></div>
+                     ${selPct ? `<div class="drive-quota-sel${overStorage ? " over" : ""}" style="width:${Math.min(selPct, 100 - usedPct)}%"></div>` : ""}
+                  </div>
+                  <div class="drive-quota-labels">
+                     <span>${this._format(usage)} used of ${this._format(limit)}</span>
+                     ${selBytes ? `<span class="drive-quota-sel-label${overStorage ? " bad" : ""}">${this._format(selBytes)} selected</span>` : ""}
+                  </div>
+               </div>` : "";
 
             const warnHtml = overStorage
                ? `<p class="drive-quota-warn bad">⚠️ Not enough free space. You have ${this._format(free)} free but the selection is ${this._format(selBytes)}.</p>`
@@ -527,7 +655,6 @@ class CourseDashboard {
 
             storageRow.innerHTML = barHtml + warnHtml;
 
-            // Disable Continue if there's not enough space
             if (overStorage) {
                this.$("#drive-continue").disabled = true;
                this.$("#drive-continue").title = "Not enough free space in Google Drive";
@@ -545,76 +672,95 @@ class CourseDashboard {
 
    _hideDriveModal = () => { this.$("#drive-scrim").hidden = true; };
 
+   // ─── BACKUP SHARED HELPERS ───────────────────────────────────────────────────
+
    /**
-    * This method is responsible for starting a local ZIP backup.
+    * Returns the onFileStatus callback wired into LocalBackup / DriveBackup.
+    * Updates this.fileStatus (in-memory only — no DB writes).
+    * @returns {(fileId: string, status: string, error?: string) => void}
     */
-   _onPickLocal = () => {
+   _makeFileStatusCallback = () => (fileId, status) => {
+      this.fileStatus.set(fileId, status);
+      this._saveFileStatus();
+      this._schedule();
+   };
+
+   /**
+    * After backup ends (done, cancelled, or error), any file still marked
+    * "downloading" in this.fileStatus was mid-flight when the run stopped.
+    * Flip them to "failed" so the UI doesn't show a stuck spinner.
+    */
+   _cleanupStuckDownloading = () => {
+      for (const [fileId, status] of this.fileStatus) {
+         if (status === "downloading") this.fileStatus.set(fileId, "failed");
+      }
+      this._saveFileStatus();
+   };
+
+   _makeProgressHandler = () => (info) => {
+      if (info.lessonId) {
+         if (info.status === "downloading") {
+            this.backupActiveLessonId = info.lessonId;
+         } else if (info.status === "lesson-done" || info.status === "lesson-failed") {
+            this.backupActiveLessonId = null;
+         }
+      }
+      this._setBackupProgress(info);
+      this._schedule();
+   };
+
+   _makeOnDone = (dest) => (summary) => {
+      this._activeBackup = null;
+      this.backupActiveLessonId = null;
+      this._cancelling = false;
+      this._backupRunning = false;
+      this._cleanupStuckDownloading();
+      this._draw();
+      this._setBackupDone(summary, dest);
+   };
+
+   _makeOnError = () => (error) => {
+      this._activeBackup = null;
+      this.backupActiveLessonId = null;
+      this._cancelling = false;
+      this._backupRunning = false;
+      this._cleanupStuckDownloading();
+      this._draw();
+      this._setBackupError(error);
+   };
+
+   // ─── LOCAL DESTINATION ───────────────────────────────────────────────────────
+
+   _onPickLocal = async () => {
       this._hideDestinationPicker();
 
-      // First, reset per-lesson backup status and redraw the tree
-      this.backupStatus = new Map();
-      this.backupCurrent = null;  // single lessonId currently downloading
+      try { localStorage.setItem(LS_DEST_KEY, "local"); } catch (_) { }
+      this.backupActiveLessonId = null;
+      this._backupRunning = true;
       this._draw();
 
-      // Then, collect only courses that have something selected
       const courses = this.model
          .filter((c) => this._courseUnits(c).some((id) => this.selected.has(id)))
          .map((c) => c.course);
-
-      // Then, read the user-supplied root folder name
       const rootFolder = (this.$("#root-folder")?.value?.trim()) || "Kajabi Backup";
 
-      // Then, show the initial progress bar
       this._setBackupProgress({ done: 0, total: 0 });
 
-      // Finally, start the backup
       this._activeBackup = new LocalBackup({
          courses,
          selected: this.selected,
          empties: this.empties,
          rootFolder,
-         onProgress: (info) => {
-            // Track the single active lesson
-            if (info.lessonId) {
-               if (info.status === "downloading") {
-                  this.backupCurrent = info.lessonId;
-               } else if (info.status === "lesson-done" || info.status === "lesson-failed") {
-                  this.backupCurrent = null;
-                  this.backupStatus.set(info.lessonId, info.status === "lesson-done" ? "done" : "failed");
-               }
-            }
-            // Track empty category completion
-            if (info.emptyId) {
-               if (info.status === "empty-done") this.backupStatus.set(info.emptyId, "done");
-               else if (info.status === "empty-failed") this.backupStatus.set(info.emptyId, "failed");
-            }
-            this._setBackupProgress(info);
-            this._schedule();
-         },
-         onDone: (summary) => {
-            this._activeBackup = null;
-            this.backupCurrent = null;
-            this._cancelling = false;
-            this._draw();
-            this._setBackupDone(summary);
-         },
-         onError: (error) => {
-            this._activeBackup = null;
-            this.backupCurrent = null;
-            this._cancelling = false;
-            this._draw();
-            this._setBackupError(error);
-         },
+         onFileStatus: this._makeFileStatusCallback(),
+         getFileStatus: (fileId) => this.fileStatus.get(fileId),
+         onProgress: this._makeProgressHandler(),
+         onDone: this._makeOnDone("local"),
+         onError: this._makeOnError(),
       });
    };
 
    // ─── DRIVE DESTINATION ───────────────────────────────────────────────────────
 
-   /**
-    * Connects to Google Drive. If forceNew is true, always opens the OAuth screen
-    * (used by "Sign in with a different account"). Otherwise only opens it when
-    * no account is connected.
-    */
    _connectDrive = async (forceNew = false) => {
       if (!forceNew) {
          const state = await chrome.runtime.sendMessage({ type: "get-drive-state" });
@@ -628,76 +774,37 @@ class CourseDashboard {
       return true;
    };
 
-   /**
-    * Called when the user clicks Continue (or Sign in & continue) in the Drive modal.
-    * Ensures auth is in place then starts the backup.
-    */
    _onPickDrive = async () => {
-      // Ensure connected — if not yet, open OAuth now
       const ok = await this._connectDrive();
       if (!ok) return;
 
-      // Reset per-lesson backup status and redraw
-      this.backupStatus = new Map();
-      this.backupCurrent = null;
+      try { localStorage.setItem(LS_DEST_KEY, "drive"); } catch (_) { }
+      this.backupActiveLessonId = null;
+      this._backupRunning = true;
       this._draw();
 
-      // Then, collect only courses that have something selected
       const courses = this.model
          .filter((c) => this._courseUnits(c).some((id) => this.selected.has(id)))
          .map((c) => c.course);
-
-      // Then, read the user-supplied root folder name
       const rootFolder = (this.$("#root-folder")?.value?.trim()) || "Kajabi Backup";
 
-      // Then, show the initial progress bar
       this._setBackupProgress({ done: 0, total: 0 });
 
-      // Finally, start the Drive backup
       this._activeBackup = new DriveBackup({
          courses,
          selected: this.selected,
          empties: this.empties,
          rootFolder,
-         onProgress: (info) => {
-            if (info.lessonId) {
-               if (info.status === "downloading") {
-                  this.backupCurrent = info.lessonId;
-               } else if (info.status === "lesson-done" || info.status === "lesson-failed") {
-                  this.backupCurrent = null;
-                  this.backupStatus.set(info.lessonId, info.status === "lesson-done" ? "done" : "failed");
-               }
-            }
-            // Track empty category completion
-            if (info.emptyId) {
-               if (info.status === "empty-done") this.backupStatus.set(info.emptyId, "done");
-               else if (info.status === "empty-failed") this.backupStatus.set(info.emptyId, "failed");
-            }
-            this._setBackupProgress(info);
-            this._schedule();
-         },
-         onDone: (summary) => {
-            this._activeBackup = null;
-            this.backupCurrent = null;
-            this._cancelling = false;
-            this._draw();
-            this._setBackupDone(summary, "drive");
-         },
-         onError: (error) => {
-            this._activeBackup = null;
-            this.backupCurrent = null;
-            this._cancelling = false;
-            this._draw();
-            this._setBackupError(error);
-         },
+         onFileStatus: this._makeFileStatusCallback(),
+         getFileStatus: (fileId) => this.fileStatus.get(fileId),
+         onProgress: this._makeProgressHandler(),
+         onDone: this._makeOnDone("drive"),
+         onError: this._makeOnError(),
       });
    };
 
    // ─── BACKUP BAR ──────────────────────────────────────────────────────────────
 
-   /**
-    * This method is responsible for updating the bottom bar during a backup.
-    */
    _setBackupProgress = (info) => {
       const { done = 0, total = 0, lessonTitle = "", courseTitle = "", fileName = "" } = info;
       const pct = total > 0 ? Math.round((done / total) * 100) : 0;
@@ -717,39 +824,53 @@ class CourseDashboard {
          this.$("#btn-cancel-backup").addEventListener("click", () => {
             this._cancelling = true;
             this._activeBackup?.cancel();
+            // Clear persisted state — cancel means start fresh next time
+            this.fileStatus.clear();
+            try { localStorage.removeItem(LS_KEY); localStorage.removeItem(LS_DEST_KEY); } catch (_) { }
             this.$("#btn-cancel-backup").disabled = true;
             this.$("#btn-cancel-backup").textContent = "Cancelling…";
          });
       }
    };
 
-   /**
-    * This method is responsible for showing the done state in the bottom bar.
-    */
    _setBackupDone = ({ saved, failed, cancelled } = {}, dest = "local") => {
-      this.backupStatus = null;
       const location = dest === "drive" ? "Google Drive" : "your Downloads folder";
       const detail = cancelled
          ? `Cancelled. ${saved} file${saved === 1 ? "" : "s"} saved before stopping.`
          : failed
             ? `${saved} file${saved === 1 ? "" : "s"} saved, ${failed} failed.`
             : `All ${saved} file${saved === 1 ? "" : "s"} saved successfully.`;
+
+      const retryBtn = !cancelled && failed > 0
+         ? `<button class="btn" id="btn-retry-failed">Retry ${failed} failed</button>`
+         : "";
+
       this.$("#bottom-in").innerHTML = `
          <div class="sum">
             <strong>Backup complete.</strong>
             <p class="muted small">${detail} Files are in ${location}.</p>
          </div>
-         <button class="btn primary" id="btn-backup">Back up again</button>`;
-      this.$("#btn-backup").addEventListener("click", () => this._showDestinationPicker());
+         <div style="display:flex;gap:8px;flex-shrink:0">
+            ${retryBtn}
+            <button class="btn primary" id="btn-backup">Back up again</button>
+         </div>`;
+
+      // "Back up again" = fresh run — clear persisted statuses first
+      this.$("#btn-backup").addEventListener("click", () => {
+         this.fileStatus.clear();
+         try { localStorage.removeItem(LS_KEY); localStorage.removeItem(LS_DEST_KEY); } catch (_) { }
+         this._showDestinationPicker();
+      });
+
+      if (!cancelled && failed > 0) {
+         this.$("#btn-retry-failed").addEventListener("click", () => {
+            if (dest === "drive") this._onPickDrive();
+            else this._onPickLocal();
+         });
+      }
    };
 
-   /**
-    * This method is responsible for showing an error in the bottom bar.
-    */
    _setBackupError = (error) => {
-      this.backupStatus = null;
-
-      // First, check for the special "ask where to save" setting error
       const isSetting = error && error.settingEnabled;
       const msg = isSetting
          ? `<strong>Automatic downloads are blocked by Chrome.</strong>
@@ -768,15 +889,9 @@ class CourseDashboard {
 
    // ─── INIT ────────────────────────────────────────────────────────────────────
 
-   /**
-    * This method is responsible for loading the saved scan, drawing the tree,
-    * and starting the file size measurement.
-    */
    _start = async () => {
-      // First, wire up all events before any draw happens
       this._initEvents();
 
-      // Then, read the scan metadata from IndexedDB
       const meta = await this._dbGet("meta", "scan");
       if (!meta) {
          this.$("#sub").textContent = "No scan yet";
@@ -788,18 +903,15 @@ class CourseDashboard {
          return;
       }
 
-      // Then, load the courses from IndexedDB and build the tree model
       const courses = (await this._dbAll("scan")).slice(0, meta.count);
+      this._scanSavedAt = meta.savedAt;   // used by _loadFileStatus to detect stale data
       this.$("#sub").textContent = `Scanned ${this.plural(courses.length, "course", "courses")} on ${new Date(meta.savedAt).toLocaleString()}`;
       this._buildModel(courses);
-
-      // Then, draw the tree before measuring starts so the page is not blank
+      this._loadFileStatus();
       this._draw();
-
-      // Finally, start measuring all file sizes in the background
-      this._measureAll(courses);
+      this._measureAll();
    };
 }
 
 // Instantiate — all side-effects run inside the constructor
-new CourseDashboard();
+window.__dashboard = new CourseDashboard();

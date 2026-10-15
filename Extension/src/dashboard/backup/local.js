@@ -15,19 +15,17 @@
  */
 
 class LocalBackup {
-   constructor({ courses, selected, empties, rootFolder, onProgress, onDone, onError }) {
-      // First, the courses data and selection state
+   constructor({ courses, selected, empties, rootFolder,
+      onProgress, onDone, onError, onFileStatus, getFileStatus }) {
       this.courses = courses;
       this.selected = selected;
       this.empties = empties;
       this.rootFolder = rootFolder;
-
-      // Then, UI callbacks
       this.onProgress = onProgress || (() => { });
       this.onDone = onDone || (() => { });
       this.onError = onError || (() => { });
-
-      // Finally, start
+      this.onFileStatus = onFileStatus || (() => { });
+      this.getFileStatus = getFileStatus || (() => undefined);
       this._run();
    }
 
@@ -58,7 +56,7 @@ class LocalBackup {
                // sendMessage can throw if the service worker is inactive
                if (attempt === MAX_TRIES - 1) return { ok: false, error: error.message };
             }
-            // Then, wait before retrying, doubling each time
+            // Wait before retrying, doubling each time
             await new Promise((r) => setTimeout(r, 500 * 2 ** attempt));
          }
          return { ok: false, error: "Failed after 3 attempts" };
@@ -91,6 +89,8 @@ class LocalBackup {
             empties: this.empties,
             rootFolder: this.rootFolder,
             writer: this._writer,
+            onFileStatus: this.onFileStatus,
+            getFileStatus: this.getFileStatus,
             onProgress: this.onProgress,
             onDone: this.onDone,
             onError: this.onError,

@@ -29,12 +29,19 @@
  *             <original name>         downloads
  *       <empty category>/             folder only
  *
- * onProgress({ done, total, courseTitle, categoryTitle, lessonTitle, fileName, status })
+ * onProgress({ done, total, courseId, categoryId, lessonId, lessonTitle, fileName, status })
+ *   status: "downloading" | "done" | "failed" | "lesson-done" | "lesson-failed" |
+ *           "empty-done" | "empty-failed"
+ *
+ * onFileStatus(url, status, error?)
+ *   Called after every file attempt so the caller can stamp the result directly
+ *   onto the source model object. url is the original CDN/S3 url (not blob urls).
  *   status: "downloading" | "done" | "failed"
  */
 
 class BackupOrchestrator {
-   constructor({ courses, selected, empties, writer, rootFolder, onProgress, onDone, onError }) {
+   constructor({ courses, selected, empties, writer, rootFolder,
+      onProgress, onDone, onError, onFileStatus, getFileStatus }) {
       // First, the course data and selection state from the dashboard
       this.courses = courses;
       this.selected = selected;
@@ -50,6 +57,13 @@ class BackupOrchestrator {
       this.onProgress = onProgress || (() => { });
       this.onDone = onDone || (() => { });
       this.onError = onError || (() => { });
+
+      // Then, per-file status callback and getter
+      // onFileStatus(fileId, status) — called to update status in the dashboard
+      // getFileStatus(fileId) → "done"|"failed"|"downloading"|undefined
+      // Files already "done" are skipped (counted as saved) without re-downloading
+      this.onFileStatus = onFileStatus || (() => { });
+      this.getFileStatus = getFileStatus || (() => undefined);
 
       // Then, progress and summary counters
       this.total = 0;
@@ -115,21 +129,43 @@ class BackupOrchestrator {
    /**
     * Calls writer.write and updates the counters and progress regardless of outcome.
     * A failed write does not stop the backup — it is counted and reported.
-    * @param {string} path  destination path
-    * @param {string} url   source URL (https:// or blob:)
-    * @param {object} ctx   { courseTitle, categoryTitle?, lessonTitle? }
-    * @param {string} fileName
+    *
+    * For CDN/S3 urls, calls onFileStatus so the dashboard can stamp
+    * file.downloadStatus directly on the matching model object.
+    * Blob urls (content.txt etc.) are skipped — no model object to stamp.
+    *
+    * @param {string}  path       destination path
+    * @param {string}  sourceUrl  original CDN/S3 url (may be a blob: url for text files)
+    * @param {object}  ctx        { courseId, categoryId?, lessonId?, lessonTitle? }
+    * @param {string}  fileName
     */
-   _write = async (path, url, ctx, fileName) => {
+   _write = async (path, sourceUrl, ctx, fileName, fileId) => {
+      const hasFileId = !!fileId;
+
+      // Skip files already successfully downloaded in a previous run
+      const currentStatus = hasFileId ? this.getFileStatus(fileId) : undefined;
+      console.log("[write]", fileName, "| fileId:", fileId, "| status:", currentStatus);
+      if (hasFileId && currentStatus === "done") {
+         console.log("[orchestrator] skipping done file:", fileId);
+         this.done++;
+         this.saved++;
+         this._report("done", { ...ctx, fileName });
+         return;
+      }
+
+      if (hasFileId) this.onFileStatus(fileId, "downloading");
       this._report("downloading", { ...ctx, fileName });
-      const result = await this.writer.write(path, url);
+
+      const result = await this.writer.write(path, sourceUrl);
       this.done++;
+
       if (result.ok) {
          this.saved++;
+         if (hasFileId) this.onFileStatus(fileId, "done");
          this._report("done", { ...ctx, fileName });
       } else {
          this.failed++;
-         // Track per-lesson/empty-category failures so we can fire the right sentinel
+         if (hasFileId) this.onFileStatus(fileId, "failed", result.error);
          const failKey = ctx.lessonId || ctx.emptyId;
          if (failKey) {
             this._lessonFails.set(failKey, (this._lessonFails.get(failKey) || 0) + 1);
@@ -180,10 +216,9 @@ class BackupOrchestrator {
     */
    _buildQueue = () => {
       const tasks = [];
-      const enc = new TextEncoder();
 
-      const push = (path, url, ctx, fileName) => {
-         tasks.push(() => this._write(path, url, ctx, fileName));
+      const push = (path, url, ctx, fileName, fileId) => {
+         tasks.push(() => this._write(path, url, ctx, fileName, fileId));
       };
 
       // Sentinel tasks fire after all files for a lesson — not counted in total
@@ -197,7 +232,7 @@ class BackupOrchestrator {
          tasks.push(async () => {
             const blob = new Blob([text], { type: "text/plain;charset=utf-8" });
             const blobUrl = URL.createObjectURL(blob);
-            await this._write(path, blobUrl, ctx, fileName);
+            await this._write(path, blobUrl, ctx, fileName, null);
             URL.revokeObjectURL(blobUrl);
          });
       };
@@ -212,7 +247,7 @@ class BackupOrchestrator {
          for (const file of (course.files || [])) {
             if (!file.url) continue;
             const fileName = `cover${this._ext(file.url, ".jpg")}`;
-            push(`${coursePath}${fileName}`, file.url, courseCtx, fileName);
+            push(`${coursePath}${fileName}`, file.url, courseCtx, fileName, file.fileId);
          }
 
          for (const category of course.categories) {
@@ -228,7 +263,7 @@ class BackupOrchestrator {
             for (const file of (category.files || [])) {
                if (!file.url) continue;
                const fileName = `thumbnail${this._ext(file.url, ".jpg")}`;
-               push(`${catPath}${fileName}`, file.url, catCtx, fileName);
+               push(`${catPath}${fileName}`, file.url, catCtx, fileName, file.fileId);
             }
 
             // Then, category info — title and description if present
@@ -267,7 +302,7 @@ class BackupOrchestrator {
                   if (file.type === "thumbnail") fileName = `thumbnail${this._ext(file.url, ".jpg")}`;
                   else if (file.type === "video") fileName = `${this._safe(post.title)}${this._ext(file.url, ".mp4")}`;
                   else fileName = this._safe(file.name || file.url.split("?")[0].split("/").pop() || "download");
-                  push(`${lessonPath}media/${fileName}`, file.url, lessonCtx, fileName);
+                  push(`${lessonPath}media/${fileName}`, file.url, lessonCtx, fileName, file.fileId);
                }
 
                // Sentinel: fires after all files for this lesson are written

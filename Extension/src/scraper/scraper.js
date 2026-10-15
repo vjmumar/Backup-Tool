@@ -146,10 +146,13 @@ window.__courseBackup.scrape = async (onProgress) => {
     * The files stay in their own place too, the shortcut only points to the same links.
     */
    const scrapeParser = (scraped) => {
-      // First, one shortcut entry for a file: { type, name, url }
-      // No link means no file, the name falls back to the last part of the link
+      // First, one shortcut entry for a file: { type, name, url, fileId }
+      // fileId is a stable incrementing ID unique within this scrape session.
+      // It is used by the dashboard to stamp sizes and download statuses directly
+      // onto the correct file object without relying on URL matching.
+      let _fileSeq = 0;
       const toFile = (type, url, name) =>
-         url && { type, name: name || url.split("?")[0].split("/").pop(), url };
+         url && { type, name: name || url.split("?")[0].split("/").pop(), url, fileId: `f${++_fileSeq}` };
 
       // Then, go through every course
       return scraped.map(({ text, link, image, categories }) => ({

@@ -10,6 +10,7 @@
   ],
   "permissions": ["storage", "identity", "downloads"],
   "background": { "service_worker": "src/background/background.js", "type": "module" },
+"key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAxC7+CrGHz2ZvicAUMlRmWUHLzlX9apY5rreRN5ZetOcJUKk5PcmOXFAVsOGrO7qLDCUssA0PuGOHfOxp0V/+ICQ5cG/Fp/mu+kLCtsapPX8vHCyDSitXnQQDyWs0C1nPeezL9B3bj3EQQ/hJNetUIKImAU+lJ4td43O65VINb85qwtADt82X/gjiXGUR3O7Wf5oVENP8IHF/AyF9fxJjgR3drlvldCV3oyIFZnTBCmWhcs6ZtH+v0U5CAr8R3yKJ3s8u1gbHrrTqjm8Wbv0MKRRqFpDaKM36vOSXq3JeEmOtH5ZGEF5lrMzvYniIgxjXyNdTwO9Cb8h+ROStNOSdNwIDAQAB",
   "content_scripts": [
     {
       "matches": ["https://app.kajabi.com/admin/*"],

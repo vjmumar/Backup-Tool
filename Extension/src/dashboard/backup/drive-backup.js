@@ -15,19 +15,17 @@
  */
 
 class DriveBackup {
-   constructor({ courses, selected, empties, rootFolder, onProgress, onDone, onError }) {
-      // First, the courses data and selection state
+   constructor({ courses, selected, empties, rootFolder,
+      onProgress, onDone, onError, onFileStatus, getFileStatus }) {
       this.courses = courses;
       this.selected = selected;
       this.empties = empties;
       this.rootFolder = rootFolder;
-
-      // Then, UI callbacks
       this.onProgress = onProgress || (() => { });
       this.onDone = onDone || (() => { });
       this.onError = onError || (() => { });
-
-      // Finally, start
+      this.onFileStatus = onFileStatus || (() => { });
+      this.getFileStatus = getFileStatus || (() => undefined);
       this._run();
    }
 
@@ -57,8 +55,6 @@ class DriveBackup {
                if (result?.ok) return { ok: true };
 
                const err = result?.error || "Unknown Drive error";
-
-               // Retry on rate-limit or transient server errors
                const retryable = /429|500|503|rate.?limit|timeout|network/i.test(err);
                if (!retryable || attempt === MAX_TRIES - 1) {
                   return { ok: false, error: err };
@@ -98,6 +94,8 @@ class DriveBackup {
             empties: this.empties,
             rootFolder: this.rootFolder,
             writer: this._writer,
+            onFileStatus: this.onFileStatus,
+            getFileStatus: this.getFileStatus,
             onProgress: this.onProgress,
             onDone: this.onDone,
             onError: this.onError,
