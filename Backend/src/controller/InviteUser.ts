@@ -26,11 +26,23 @@ export const inviteUser = async (
 
     // Then — check if user already exists
     const existing = await prisma.user.findUnique({ where: { email } });
+
     if (existing) {
-      return res.status(409).json({
-        message: "error",
-        data: { message: "A user with that email already exists" },
+      // User exists — just increment their connectionLimit, no email sent
+      const addAmount = connectionLimit ?? 1;
+      const updated = await prisma.user.update({
+        where: { email },
+        data: { connectionLimit: { increment: addAmount } },
+        select: {
+          id: true,
+          email: true,
+          freshSignIn: true,
+          connectionLimit: true,
+          createdAt: true,
+        },
       });
+
+      return res.status(200).json({ message: "success", data: updated });
     }
 
     // Then — generate a temporary password and hash it
