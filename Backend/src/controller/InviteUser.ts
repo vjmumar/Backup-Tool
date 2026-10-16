@@ -29,7 +29,7 @@ export const inviteUser = async (
 
     if (existing) {
       // User exists — just increment their connectionLimit, no email sent
-      const addAmount = connectionLimit ?? 1;
+      const addAmount = Number(existing.connectionLimit) + Number(connectionLimit ?? 1);
       const updated = await prisma.user.update({
         where: { email },
         data: { connectionLimit: { increment: addAmount } },
