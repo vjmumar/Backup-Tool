@@ -219,5 +219,5 @@ button { font: inherit; color: inherit; cursor: pointer; }
     );
   };
 
-  return { mount, unmount, open, close, isOpen, showReady, showScanning, showError, showDone };
+  return { mount, unmount, open, close, isOpen, showReady, showScanning, showError, showDone, setView, getBody: () => mb };
 })();

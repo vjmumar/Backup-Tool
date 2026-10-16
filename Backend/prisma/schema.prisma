@@ -1,0 +1,32 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mongodb"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id                  String               @id @default(auto()) @map("_id") @db.ObjectId
+  email               String               @unique
+  passwordHash        String
+  freshSignIn         Boolean              @default(true)
+  isActive            Boolean              @default(true)
+  connectionLimit     Int                  @default(3)
+  createdAt           DateTime             @default(now())
+  updatedAt           DateTime             @updatedAt
+
+  platformConnections PlatformConnection[]
+}
+
+model PlatformConnection {
+  id        String   @id @default(auto()) @map("_id") @db.ObjectId
+  platform  String
+  lockId    String
+  userId    String   @db.ObjectId
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user      User     @relation(fields: [userId], references: [id])
+}

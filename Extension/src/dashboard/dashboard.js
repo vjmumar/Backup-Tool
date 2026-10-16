@@ -17,6 +17,8 @@
 
 const LS_KEY = "courseBackup_fileStatus";
 const LS_DEST_KEY = "courseBackup_destination";
+const LS_ROOT_KEY = "courseBackup_rootFolder";
+const LS_SELECTED_KEY = "courseBackup_selected";
 
 class CourseDashboard {
    constructor() {
@@ -125,6 +127,7 @@ class CourseDashboard {
             console.log("[loadFileStatus] stale — stored savedAt:", data.savedAt, "current:", this._scanSavedAt);
             localStorage.removeItem(LS_KEY);
             localStorage.removeItem(LS_DEST_KEY);
+            localStorage.removeItem(LS_ROOT_KEY);
             return;
          }
          data.entries.forEach(([fileId, status]) => {
@@ -136,6 +139,44 @@ class CourseDashboard {
          // Persist the cleaned-up statuses (downloading → failed) back to localStorage
          this._saveFileStatus();
       } catch (_) { }
+   };
+
+   /**
+    * Persists the current selected set to localStorage, tagged with savedAt
+    * so stale data from a previous scrape is automatically discarded.
+    */
+   _saveSelected = () => {
+      try {
+         localStorage.setItem(LS_SELECTED_KEY, JSON.stringify({
+            savedAt: this._scanSavedAt,
+            ids: [...this.selected],
+         }));
+      } catch (_) { }
+   };
+
+   /**
+    * Restores the selected set from localStorage.
+    * Returns true when a valid, non-stale selection was found and applied,
+    * so the caller knows NOT to fall back to select-all.
+    */
+   _loadSelected = () => {
+      try {
+         const raw = localStorage.getItem(LS_SELECTED_KEY);
+         if (!raw) return false;
+         const data = JSON.parse(raw);
+         if (!data || !Array.isArray(data.ids)) return false;
+         // Stale check — must match the current scan
+         if (data.savedAt !== this._scanSavedAt) {
+            localStorage.removeItem(LS_SELECTED_KEY);
+            return false;
+         }
+         // Only keep ids that still exist in the current model
+         const allUnits = new Set(this.model.flatMap((c) => this._courseUnits(c)));
+         this.selected = new Set(data.ids.filter((id) => allUnits.has(id)));
+         return true;
+      } catch (_) {
+         return false;
+      }
    };
 
    /**
@@ -300,7 +341,7 @@ class CourseDashboard {
 
    // ─── TREE MODEL ──────────────────────────────────────────────────────────────
 
-   _buildModel = (courses) => {
+   _buildModel = (courses, skipDefaultSelection = false) => {
       this.model = courses.map((course) => ({
          id: course.id,
          course,
@@ -314,7 +355,10 @@ class CourseDashboard {
             };
          }),
       }));
-      this.selected = new Set(this.model.flatMap((c) => this._courseUnits(c)));
+      // Only select-all when there is no persisted selection to restore
+      if (!skipDefaultSelection) {
+         this.selected = new Set(this.model.flatMap((c) => this._courseUnits(c)));
+      }
       if (this.model.length) this.open.add(this.model[0].id);
       this._buildFileIndex();
    };
@@ -397,14 +441,24 @@ class CourseDashboard {
       else if (lessonStatus === "failed")
          badge = '<span class="tag bk-fail">✗ Failed</span>';
 
+      // Show a retry button on failed lessons when no backup is running.
+      // Clicking it clears only this lesson's file statuses, then resumes
+      // the backup — the orchestrator skips all "done" files so only
+      // this lesson's failed files are re-attempted.
+      const retryBtn = !this._backupRunning && lessonStatus === "failed"
+         ? `<button class="btn-retry-lesson" data-retry-lesson="${this.esc(l.id)}" title="Retry this lesson">↺ Retry</button>`
+         : "";
+
       const rowClass = isActive || lessonStatus === "downloading" ? " bk-row"
-         : lessonStatus === "done" ? " bk-row-done" : "";
+         : lessonStatus === "done" ? " bk-row-done"
+            : lessonStatus === "failed" ? " bk-row-fail" : "";
 
       return `
       <div class="lesson${rowClass}">
          ${this._checkHtml([l.id], l.post.title || "Untitled lesson")}
          ${this._tagsOf(l.post)}
          ${badge}
+         ${retryBtn}
          <span class="meta">${this._sizeHtml(this._lessonStat(l))}</span>
       </div>`;
    };
@@ -467,6 +521,18 @@ class CourseDashboard {
       });
       const folderInput = this.$("#root-folder");
       if (folderInput) folderInput.disabled = this._backupRunning;
+
+      // Keep the select-all checkbox in sync with the tree state
+      const allUnits = this.model.flatMap((c) => this._courseUnits(c));
+      const nSelected = allUnits.filter((id) => this.selected.has(id)).length;
+      const selectAll = this.$("#select-all-checkbox");
+      if (selectAll) {
+         selectAll.disabled = this._backupRunning;
+         selectAll.checked = allUnits.length > 0 && nSelected === allUnits.length;
+         selectAll.indeterminate = nSelected > 0 && nSelected < allUnits.length;
+      }
+      const selectAllRow = this.$("#select-all-row");
+      if (selectAllRow) selectAllRow.hidden = this.model.length === 0;
       window.scrollTo({ top: scrollY, behavior: "instant" });
 
       if (this._backupRunning) return;
@@ -511,8 +577,7 @@ class CourseDashboard {
          <button class="btn primary" id="btn-backup" ${canBackup ? "" : "disabled"} title="${canBackup ? "Choose where to save" : "Waiting for sizes to finish measuring"}">${btnLabel}</button>`;
       if (canBackup) {
          this.$("#btn-backup").addEventListener("click", () => {
-            if (hasStatus && savedDest === "drive") this._onPickDrive();
-            else if (hasStatus && savedDest === "local") this._onPickLocal();
+            if (hasStatus && savedDest) this._showResumeModal(savedDest);
             else this._showDestinationPicker();
          });
       }
@@ -527,9 +592,59 @@ class CourseDashboard {
       });
    };
 
+   // ─── PER-LESSON RETRY ────────────────────────────────────────────────────────
+
+   /**
+    * Resets the file statuses for a single lesson's files from "failed" to
+    * undefined (removes from the map), then resumes the backup.
+    * The orchestrator skips all "done" files, so only this lesson's failed
+    * files will be re-attempted.
+    *
+    * @param {string} lessonId  The lesson's post id
+    */
+   _retryLesson = (lessonId) => {
+      // First, find the lesson's file objects via the file index
+      const entry = this._fileIndex;
+      if (!entry) return;
+
+      // Then, clear "failed" statuses only for files belonging to this lesson
+      this.model.forEach(({ course }) => {
+         course.categories.forEach((category) => {
+            (category.posts || []).forEach((post) => {
+               if (String(post.id) !== String(lessonId)) return;
+               (post.files || []).forEach((file) => {
+                  if (file.fileId && this.fileStatus.get(file.fileId) === "failed") {
+                     this.fileStatus.delete(file.fileId);
+                  }
+               });
+            });
+         });
+      });
+
+      this._saveFileStatus();
+
+      // Finally, resume the backup — the saved destination decides which writer to use
+      const savedDest = (() => { try { return localStorage.getItem(LS_DEST_KEY); } catch (_) { return null; } })();
+      if (savedDest === "drive") this._onPickDrive();
+      else this._onPickLocal();
+   };
+
    // ─── EVENTS ──────────────────────────────────────────────────────────────────
 
    _initEvents = () => {
+      // Select-all checkbox above the tree
+      this.$("#select-all-checkbox").addEventListener("change", (e) => {
+         if (this._backupRunning) return;
+         const allUnits = this.model.flatMap((c) => this._courseUnits(c));
+         if (e.target.checked) {
+            allUnits.forEach((id) => this.selected.add(id));
+         } else {
+            allUnits.forEach((id) => this.selected.delete(id));
+         }
+         this._saveSelected();
+         this._draw();
+      });
+
       this.$("#tree").addEventListener("click", (e) => {
          const toggle = e.target.closest("[data-toggle]");
          if (toggle) {
@@ -537,12 +652,19 @@ class CourseDashboard {
             this.open.has(id) ? this.open.delete(id) : this.open.add(id);
             return this._draw();
          }
+         // Per-lesson retry button — clears only this lesson's failed files then resumes
+         const retryBtn = e.target.closest("[data-retry-lesson]");
+         if (retryBtn && !this._backupRunning) {
+            this._retryLesson(retryBtn.dataset.retryLesson);
+            return;
+         }
          if (this._backupRunning) return;
          const input = e.target.closest("input[data-ids]");
          if (input) {
             input.dataset.ids.split(",").forEach((i) =>
                input.checked ? this.selected.add(i) : this.selected.delete(i)
             );
+            this._saveSelected();
             this._draw();
          }
       });
@@ -555,6 +677,24 @@ class CourseDashboard {
          if (e.key === "Escape" && !this.$("#dest-scrim").hidden) this._hideDestinationPicker();
          if (e.key === "Escape" && !this.$("#setup-scrim").hidden) this._hideSetupModal();
          if (e.key === "Escape" && !this.$("#drive-scrim").hidden) this._hideDriveModal();
+      });
+
+      // Resume modal — "Resume backup" keeps the saved destination, "Start fresh" clears everything
+      this.$("#resume-yes").addEventListener("click", () => {
+         this._hideResumeModal();
+         const savedDest = (() => { try { return localStorage.getItem(LS_DEST_KEY); } catch (_) { return null; } })();
+         if (savedDest === "drive") this._onPickDrive();
+         else this._onPickLocal();
+      });
+      this.$("#resume-no").addEventListener("click", () => {
+         this._hideResumeModal();
+         // Clear all persisted run state so the user picks fresh
+         this.fileStatus.clear();
+         try {
+            localStorage.removeItem(LS_KEY);
+            localStorage.removeItem(LS_DEST_KEY);
+         } catch (_) { }
+         this._showDestinationPicker();
       });
 
       this.$("#dest-local").addEventListener("click", () => {
@@ -597,6 +737,23 @@ class CourseDashboard {
 
    _showDestinationPicker = () => { this.$("#dest-scrim").hidden = false; };
    _hideDestinationPicker = () => { this.$("#dest-scrim").hidden = true; };
+
+   // ─── RESUME MODAL ────────────────────────────────────────────────────────────
+
+   _showResumeModal = (savedDest) => {
+      const hint = this.$("#resume-dest-hint");
+      if (hint) {
+         hint.textContent = savedDest === "drive"
+            ? "Previous destination: Google Drive."
+            : savedDest === "local"
+               ? "Previous destination: Local (Downloads folder)."
+               : "";
+      }
+      this.$("#resume-scrim").hidden = false;
+   };
+
+   _hideResumeModal = () => { this.$("#resume-scrim").hidden = true; };
+
    _showSetupModal = () => { this.$("#setup-scrim").hidden = false; };
    _hideSetupModal = () => { this.$("#setup-scrim").hidden = true; };
 
@@ -743,6 +900,7 @@ class CourseDashboard {
          .filter((c) => this._courseUnits(c).some((id) => this.selected.has(id)))
          .map((c) => c.course);
       const rootFolder = (this.$("#root-folder")?.value?.trim()) || "Kajabi Backup";
+      try { localStorage.setItem(LS_ROOT_KEY, rootFolder); } catch (_) { }
 
       this._setBackupProgress({ done: 0, total: 0 });
 
@@ -787,6 +945,7 @@ class CourseDashboard {
          .filter((c) => this._courseUnits(c).some((id) => this.selected.has(id)))
          .map((c) => c.course);
       const rootFolder = (this.$("#root-folder")?.value?.trim()) || "Kajabi Backup";
+      try { localStorage.setItem(LS_ROOT_KEY, rootFolder); } catch (_) { }
 
       this._setBackupProgress({ done: 0, total: 0 });
 
@@ -826,7 +985,7 @@ class CourseDashboard {
             this._activeBackup?.cancel();
             // Clear persisted state — cancel means start fresh next time
             this.fileStatus.clear();
-            try { localStorage.removeItem(LS_KEY); localStorage.removeItem(LS_DEST_KEY); } catch (_) { }
+            try { localStorage.removeItem(LS_KEY); localStorage.removeItem(LS_DEST_KEY); localStorage.removeItem(LS_ROOT_KEY); localStorage.removeItem(LS_SELECTED_KEY); } catch (_) { }
             this.$("#btn-cancel-backup").disabled = true;
             this.$("#btn-cancel-backup").textContent = "Cancelling…";
          });
@@ -858,7 +1017,7 @@ class CourseDashboard {
       // "Back up again" = fresh run — clear persisted statuses first
       this.$("#btn-backup").addEventListener("click", () => {
          this.fileStatus.clear();
-         try { localStorage.removeItem(LS_KEY); localStorage.removeItem(LS_DEST_KEY); } catch (_) { }
+         try { localStorage.removeItem(LS_KEY); localStorage.removeItem(LS_DEST_KEY); localStorage.removeItem(LS_ROOT_KEY); localStorage.removeItem(LS_SELECTED_KEY); } catch (_) { }
          this._showDestinationPicker();
       });
 
@@ -892,6 +1051,18 @@ class CourseDashboard {
    _start = async () => {
       this._initEvents();
 
+      // First, verify the session is still valid — show an expired state if not
+      const me = await chrome.runtime.sendMessage({ type: "auth-get-me" }).catch(() => null);
+      if (!me?.ok) {
+         this.$("#sub").textContent = "Session expired";
+         this.$("#tree").innerHTML = `
+            <div class="state">
+               <strong>Session expired</strong>
+               <p>Your session has expired. Close this tab, open the extension popup, and sign in again.</p>
+            </div>`;
+         return;
+      }
+
       const meta = await this._dbGet("meta", "scan");
       if (!meta) {
          this.$("#sub").textContent = "No scan yet";
@@ -906,10 +1077,32 @@ class CourseDashboard {
       const courses = (await this._dbAll("scan")).slice(0, meta.count);
       this._scanSavedAt = meta.savedAt;   // used by _loadFileStatus to detect stale data
       this.$("#sub").textContent = `Scanned ${this.plural(courses.length, "course", "courses")} on ${new Date(meta.savedAt).toLocaleString()}`;
-      this._buildModel(courses);
+
+      // Restore persisted folder name before drawing
+      try {
+         const savedRoot = localStorage.getItem(LS_ROOT_KEY);
+         if (savedRoot) {
+            const input = this.$("#root-folder");
+            if (input) input.value = savedRoot;
+         }
+      } catch (_) { }
+
+      this._buildModel(courses, true);   // don't select-all yet — _loadSelected decides
+      const hadSelection = this._loadSelected();
+      if (!hadSelection) {
+         // First visit for this scan — select everything by default
+         this.selected = new Set(this.model.flatMap((c) => this._courseUnits(c)));
+         this._saveSelected();
+      }
       this._loadFileStatus();
       this._draw();
       this._measureAll();
+
+      // After the tree is drawn, prompt for resume if there's a previous run
+      const savedDest = (() => { try { return localStorage.getItem(LS_DEST_KEY); } catch (_) { return null; } })();
+      if (this.fileStatus.size > 0 && savedDest) {
+         this._showResumeModal(savedDest);
+      }
    };
 }
 

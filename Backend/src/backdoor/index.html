@@ -1,0 +1,501 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Admin Backdoor</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: #0f1117;
+      color: #e2e8f0;
+      min-height: 100vh;
+    }
+
+    #lock-screen {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      min-height: 100vh;
+      gap: 16px;
+    }
+
+    #lock-screen h1 { font-size: 20px; color: #94a3b8; }
+
+    #lock-screen input {
+      padding: 10px 14px;
+      background: #1e2330;
+      border: 1px solid #2d3748;
+      border-radius: 8px;
+      color: #e2e8f0;
+      font-size: 14px;
+      width: 260px;
+      outline: none;
+    }
+
+    #lock-screen input:focus { border-color: #6366f1; }
+
+    #lock-error { color: #f87171; font-size: 13px; display: none; }
+
+    #app { display: none; padding: 32px; max-width: 960px; margin: 0 auto; }
+
+    header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 32px;
+    }
+
+    header h1 { font-size: 22px; font-weight: 700; }
+
+    .badge {
+      padding: 4px 10px;
+      border-radius: 999px;
+      font-size: 12px;
+      font-weight: 600;
+    }
+
+    .badge.on  { background: #dc2626; color: #fff; }
+    .badge.off { background: #166534; color: #bbf7d0; }
+
+    .section {
+      background: #1e2330;
+      border: 1px solid #2d3748;
+      border-radius: 12px;
+      padding: 24px;
+      margin-bottom: 24px;
+    }
+
+    .section h2 {
+      font-size: 14px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: .05em;
+      color: #94a3b8;
+      margin-bottom: 16px;
+    }
+
+    .row {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+
+    input[type="text"], input[type="email"], input[type="number"] {
+      padding: 8px 12px;
+      background: #0f1117;
+      border: 1px solid #2d3748;
+      border-radius: 8px;
+      color: #e2e8f0;
+      font-size: 13px;
+      outline: none;
+      flex: 1;
+      min-width: 160px;
+    }
+
+    input:focus { border-color: #6366f1; }
+
+    button {
+      padding: 8px 16px;
+      border: none;
+      border-radius: 8px;
+      font-size: 13px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: opacity .15s;
+    }
+
+    button:hover { opacity: .85; }
+
+    .btn-primary   { background: #6366f1; color: #fff; }
+    .btn-danger    { background: #dc2626; color: #fff; }
+    .btn-success   { background: #16a34a; color: #fff; }
+    .btn-warning   { background: #d97706; color: #fff; }
+    .btn-secondary { background: #334155; color: #e2e8f0; }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 13px;
+    }
+
+    th {
+      text-align: left;
+      padding: 8px 12px;
+      color: #64748b;
+      border-bottom: 1px solid #2d3748;
+      font-weight: 600;
+    }
+
+    td {
+      padding: 10px 12px;
+      border-bottom: 1px solid #1a2035;
+      vertical-align: middle;
+    }
+
+    tr:last-child td { border-bottom: none; }
+
+    td .actions { display: flex; gap: 8px; }
+
+    .tag {
+      display: inline-block;
+      padding: 2px 8px;
+      border-radius: 999px;
+      font-size: 11px;
+      font-weight: 600;
+    }
+
+    .tag.fresh    { background: #d97706; color: #fff; }
+    .tag.active   { background: #166534; color: #bbf7d0; }
+    .tag.disabled { background: #7f1d1d; color: #fca5a5; }
+
+    #toast {
+      position: fixed;
+      bottom: 24px;
+      right: 24px;
+      background: #1e2330;
+      border: 1px solid #2d3748;
+      border-radius: 10px;
+      padding: 12px 18px;
+      font-size: 13px;
+      opacity: 0;
+      transition: opacity .25s;
+      pointer-events: none;
+      max-width: 300px;
+    }
+
+    #toast.show { opacity: 1; }
+    #toast.ok   { border-color: #16a34a; color: #bbf7d0; }
+    #toast.err  { border-color: #dc2626; color: #fca5a5; }
+
+    .edit-input {
+      width: 70px;
+      padding: 4px 8px;
+      background: #0f1117;
+      border: 1px solid #4f46e5;
+      border-radius: 6px;
+      color: #e2e8f0;
+      font-size: 12px;
+    }
+
+    #maintenance-toggle {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+    }
+
+    .switch {
+      position: relative;
+      display: inline-block;
+      width: 44px;
+      height: 24px;
+    }
+
+    .switch input { opacity: 0; width: 0; height: 0; }
+
+    .slider {
+      position: absolute;
+      inset: 0;
+      background: #334155;
+      border-radius: 999px;
+      cursor: pointer;
+      transition: .2s;
+    }
+
+    .slider:before {
+      content: "";
+      position: absolute;
+      width: 18px;
+      height: 18px;
+      left: 3px;
+      bottom: 3px;
+      background: #fff;
+      border-radius: 50%;
+      transition: .2s;
+    }
+
+    input:checked + .slider { background: #dc2626; }
+    input:checked + .slider:before { transform: translateX(20px); }
+  </style>
+</head>
+<body>
+
+<!-- Lock screen -->
+<div id="lock-screen">
+  <h1>🔒 Admin Access</h1>
+  <input id="pwd-input" type="password" placeholder="Enter password" />
+  <p id="lock-error">Incorrect password</p>
+  <button class="btn-primary" onclick="unlock()">Enter</button>
+</div>
+
+<!-- App -->
+<div id="app">
+  <header>
+    <h1>⚙️ Admin Backdoor</h1>
+    <div id="maintenance-toggle">
+      <span id="maint-label">Maintenance: <strong>OFF</strong></span>
+      <label class="switch">
+        <input type="checkbox" id="maint-checkbox" onchange="toggleMaintenance(this.checked)" />
+        <span class="slider"></span>
+      </label>
+      <span id="maint-badge" class="badge off">OFF</span>
+    </div>
+  </header>
+
+  <!-- Invite user -->
+  <div class="section">
+    <h2>Invite New User</h2>
+    <div class="row">
+      <input type="email" id="invite-email" placeholder="Email address" />
+      <input type="number" id="invite-limit" placeholder="Connection limit (default 3)" min="1" />
+      <button class="btn-primary" onclick="inviteUser()">Send Invite</button>
+    </div>
+  </div>
+
+  <!-- Users table -->
+  <div class="section">
+    <h2>Users</h2>
+    <table>
+      <thead>
+        <tr>
+          <th>Email</th>
+          <th>Login Status</th>
+          <th>Active</th>
+          <th>Conn. Limit</th>
+          <th>Created</th>
+          <th>Actions</th>
+        </tr>
+      </thead>
+      <tbody id="users-tbody">
+        <tr><td colspan="5" style="color:#64748b">Loading…</td></tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<div id="toast"></div>
+
+<script>
+  const BASE = "";
+
+  // ── Lock screen ────────────────────────────────────────────────────────────
+
+  document.getElementById("pwd-input").addEventListener("keydown", e => {
+    if (e.key === "Enter") unlock();
+  });
+
+  async function unlock() {
+    const val = document.getElementById("pwd-input").value;
+    if (!val) return;
+
+    try {
+      const res = await fetch(`${BASE}/api/backdoor/access`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ password: val }),
+      });
+      const json = await res.json();
+
+      if (json.data?.access === true) {
+        document.getElementById("lock-screen").style.display = "none";
+        document.getElementById("app").style.display = "block";
+        loadAll();
+      } else {
+        document.getElementById("lock-error").style.display = "block";
+      }
+    } catch {
+      document.getElementById("lock-error").style.display = "block";
+    }
+  }
+
+  // ── Toast ──────────────────────────────────────────────────────────────────
+
+  function toast(msg, type = "ok") {
+    const el = document.getElementById("toast");
+    el.textContent = msg;
+    el.className = `show ${type}`;
+    setTimeout(() => { el.className = ""; }, 3000);
+  }
+
+  // ── Load all ───────────────────────────────────────────────────────────────
+
+  async function loadAll() {
+    await Promise.all([loadUsers(), loadMaintenance()]);
+  }
+
+  // ── Maintenance ────────────────────────────────────────────────────────────
+
+  async function loadMaintenance() {
+    try {
+      const res = await fetch(`${BASE}/api/config/maintenance`);
+      const json = await res.json();
+      setMaintenanceUI(json.data.isMaintenance);
+    } catch {
+      toast("Failed to load maintenance status", "err");
+    }
+  }
+
+  function setMaintenanceUI(value) {
+    document.getElementById("maint-checkbox").checked = value;
+    const badge = document.getElementById("maint-badge");
+    const label = document.getElementById("maint-label");
+    badge.textContent = value ? "ON" : "OFF";
+    badge.className = `badge ${value ? "on" : "off"}`;
+    label.innerHTML = `Maintenance: <strong>${value ? "ON" : "OFF"}</strong>`;
+  }
+
+  async function toggleMaintenance(value) {
+    try {
+      const res = await fetch(`${BASE}/api/config/maintenance`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ isMaintenance: value }),
+      });
+      const json = await res.json();
+      setMaintenanceUI(json.data.isMaintenance);
+      toast(`Maintenance mode ${value ? "enabled" : "disabled"}`);
+    } catch {
+      toast("Failed to toggle maintenance", "err");
+    }
+  }
+
+  // ── Users ──────────────────────────────────────────────────────────────────
+
+  async function loadUsers() {
+    try {
+      const res = await fetch(`${BASE}/api/backdoor/users`);
+      const json = await res.json();
+      renderUsers(json.data);
+    } catch {
+      toast("Failed to load users", "err");
+    }
+  }
+
+  function renderUsers(users) {
+    const tbody = document.getElementById("users-tbody");
+    if (!users || users.length === 0) {
+      tbody.innerHTML = `<tr><td colspan="6" style="color:#64748b">No users found.</td></tr>`;
+      return;
+    }
+    tbody.innerHTML = users.map(u => `
+      <tr>
+        <td>${u.email}</td>
+        <td>
+          <span class="tag ${u.freshSignIn ? "fresh" : "active"}">
+            ${u.freshSignIn ? "Fresh login" : "Active"}
+          </span>
+        </td>
+        <td>
+          <label class="switch">
+            <input type="checkbox" ${u.isActive ? "checked" : ""} onchange="toggleActive('${u.id}', this.checked)" />
+            <span class="slider"></span>
+          </label>
+        </td>
+        <td>
+          <input class="edit-input" type="number" value="${u.connectionLimit}" min="1" id="limit-${u.id}" />
+        </td>
+        <td>${new Date(u.createdAt).toLocaleDateString()}</td>
+        <td>
+          <div class="actions">
+            <button class="btn-warning" onclick="updateLimit('${u.id}')">Save</button>
+            <button class="btn-danger"  onclick="deleteUser('${u.id}')">Delete</button>
+          </div>
+        </td>
+      </tr>
+    `).join("");
+  }
+
+  async function inviteUser() {
+    const email = document.getElementById("invite-email").value.trim();
+    const limitVal = document.getElementById("invite-limit").value;
+    if (!email) { toast("Email is required", "err"); return; }
+
+    const body = { email };
+    if (limitVal) body.connectionLimit = parseInt(limitVal);
+
+    try {
+      const res = await fetch(`${BASE}/api/invite-user`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      const json = await res.json();
+      if (json.message === "success") {
+        toast(`Invited ${email}`);
+        document.getElementById("invite-email").value = "";
+        document.getElementById("invite-limit").value = "";
+        loadUsers();
+      } else {
+        toast(json.data?.message || "Invite failed", "err");
+      }
+    } catch {
+      toast("Request failed", "err");
+    }
+  }
+
+  async function toggleActive(id, value) {
+    try {
+      const res = await fetch(`${BASE}/api/backdoor/users/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ isActive: value }),
+      });
+      const json = await res.json();
+      if (json.message === "success") {
+        toast(`User ${value ? "enabled" : "disabled"}`);
+        loadUsers();
+      } else {
+        toast(json.data?.message || "Update failed", "err");
+        loadUsers(); // revert toggle
+      }
+    } catch {
+      toast("Request failed", "err");
+      loadUsers();
+    }
+  }
+
+  async function updateLimit(id) {
+    const val = parseInt(document.getElementById(`limit-${id}`).value);
+    if (!val || val < 1) { toast("Invalid limit", "err"); return; }
+
+    try {
+      const res = await fetch(`${BASE}/api/backdoor/users/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ connectionLimit: val }),
+      });
+      const json = await res.json();
+      if (json.message === "success") {
+        toast("Connection limit updated");
+        loadUsers();
+      } else {
+        toast(json.data?.message || "Update failed", "err");
+      }
+    } catch {
+      toast("Request failed", "err");
+    }
+  }
+
+  async function deleteUser(id) {
+    if (!confirm("Delete this user? This cannot be undone.")) return;
+
+    try {
+      const res = await fetch(`${BASE}/api/backdoor/users/${id}`, { method: "DELETE" });
+      const json = await res.json();
+      if (json.message === "success") {
+        toast("User deleted");
+        loadUsers();
+      } else {
+        toast(json.data?.message || "Delete failed", "err");
+      }
+    } catch {
+      toast("Request failed", "err");
+    }
+  }
+</script>
+</body>
+</html>

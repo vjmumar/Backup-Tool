@@ -70,6 +70,16 @@ body {
 #sub { margin: 0; color: var(--muted); font-size: 12px; }
 .top-actions { display: flex; align-items: center; gap: 8px; }
 
+/* ── Select all row ────────────────────────────────────────────────────────── */
+.select-all-row {
+   display: flex;
+   align-items: center;
+   padding: 6px 14px 8px;
+   border-bottom: 1px solid var(--line);
+   margin-bottom: 4px;
+}
+.select-all-label { font-size: 13px; font-weight: 600; }
+
 /* ── Folder name row ───────────────────────────────────────────────────────── */
 .folder-name-row {
    display: flex; align-items: center; gap: 10px;
@@ -217,6 +227,7 @@ body {
 /* ── Backup progress badges ────────────────────────────────────────────────── */
 .bk-row      { background: rgba(45,212,191,.06) !important; }
 .bk-row-done { background: rgba(74,222,128,.05) !important; }
+.bk-row-fail { background: rgba(248,113,113,.05) !important; }
 .tag.bk-active {
    color: var(--accent);
    animation: pulse 1s ease-in-out infinite !important;
@@ -224,9 +235,27 @@ body {
 .tag.bk-active::before { content: "•"; color: var(--accent); }
 .tag.bk-done  { color: var(--good); }
 .tag.bk-done::before  { content: "✓"; font-size: 11px; }
+.tag.bk-fail  { color: var(--bad); }
+.tag.bk-fail::before  { content: "✗"; font-size: 11px; }
 .tag.bk-skip  { color: var(--dim); }
 .tag.bk-skip::before  { content: "•"; }
 @keyframes pulse { 0%,100% { opacity:1; } 50% { opacity:.4; } }
+
+/* ── Per-lesson retry button ───────────────────────────────────────────────── */
+.btn-retry-lesson {
+   font: inherit;
+   font-size: 11px;
+   font-weight: 600;
+   color: var(--bad);
+   background: var(--bad-soft);
+   border: 1px solid color-mix(in srgb, var(--bad) 25%, transparent);
+   border-radius: 5px;
+   padding: 2px 7px;
+   cursor: pointer;
+   white-space: nowrap;
+   transition: filter .12s;
+}
+.btn-retry-lesson:hover { filter: brightness(1.08); }
 
 /* ── Category / course completion glow ─────────────────────────────────────── */
 .bk-cat-done {
