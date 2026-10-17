@@ -1,8 +1,9 @@
 import { Router } from "express";
-import { inviteUser } from "../controller/InviteUser";
+import { inviteUser, incrementConnection } from "../controller/InviteUser";
 
 const router = Router();
 
 router.post("/", inviteUser);
+router.post("/increment-connection", incrementConnection);
 
 export default router;
