@@ -35,7 +35,7 @@ window.__courseBackup.scrape = async (onProgress) => {
                 doc.querySelectorAll(
                     "pds-table[component-id = 'table-product'] a[href *= '/admin/products/'][data-shell-frame-linker-target='link']",
                 ),
-            ).slice(0, 3).reduce((a, c) => {
+            ).reduce((a, c) => {
                 const image = c.querySelector("img");
                 a.push({
                     text: c.innerText,
@@ -47,7 +47,7 @@ window.__courseBackup.scrape = async (onProgress) => {
             array.push(...courseLinks);
 
             // Finally, stop on the last page, otherwise move on to the next page
-            if (page === 1) {
+            if (disabledNextButton) {
                 isLast = true;
                 resolve(array);
                 break;
