@@ -607,7 +607,9 @@ class CourseDashboard {
       const entry = this._fileIndex;
       if (!entry) return;
 
-      // Then, clear "failed" statuses only for files belonging to this lesson
+      // Then, clear only the "failed" statuses for this lesson's files so
+      // _write will re-attempt them. "done" files in the same lesson stay
+      // done and are still skipped by _write's getFileStatus check.
       this.model.forEach(({ course }) => {
          course.categories.forEach((category) => {
             (category.posts || []).forEach((post) => {
@@ -623,10 +625,11 @@ class CourseDashboard {
 
       this._saveFileStatus();
 
-      // Finally, resume the backup — the saved destination decides which writer to use
+      // Finally, start the backup with resumeAtPostId so the orchestrator
+      // jumps straight to this lesson without re-running anything before it.
       const savedDest = (() => { try { return localStorage.getItem(LS_DEST_KEY); } catch (_) { return null; } })();
-      if (savedDest === "drive") this._onPickDrive();
-      else this._onPickLocal();
+      if (savedDest === "drive") this._onPickDrive({ resumeAtPostId: lessonId });
+      else this._onPickLocal({ resumeAtPostId: lessonId });
    };
 
    // ─── EVENTS ──────────────────────────────────────────────────────────────────
@@ -869,9 +872,13 @@ class CourseDashboard {
    _makeOnDone = (dest) => (summary) => {
       this._activeBackup = null;
       this.backupActiveLessonId = null;
+      const wasCancelled = this._cancelling;
       this._cancelling = false;
       this._backupRunning = false;
-      this._cleanupStuckDownloading();
+      // Don't clean up stuck files on cancel — the cancel handler already cleared everything for a fresh start
+      if (!wasCancelled && !summary?.cancelled) {
+         this._cleanupStuckDownloading();
+      }
       this._draw();
       this._setBackupDone(summary, dest);
    };
@@ -879,16 +886,19 @@ class CourseDashboard {
    _makeOnError = () => (error) => {
       this._activeBackup = null;
       this.backupActiveLessonId = null;
+      const wasCancelled = this._cancelling;
       this._cancelling = false;
       this._backupRunning = false;
-      this._cleanupStuckDownloading();
+      if (!wasCancelled) {
+         this._cleanupStuckDownloading();
+      }
       this._draw();
       this._setBackupError(error);
    };
 
    // ─── LOCAL DESTINATION ───────────────────────────────────────────────────────
 
-   _onPickLocal = async () => {
+   _onPickLocal = async ({ resumeAtPostId = null } = {}) => {
       this._hideDestinationPicker();
 
       try { localStorage.setItem(LS_DEST_KEY, "local"); } catch (_) { }
@@ -914,6 +924,7 @@ class CourseDashboard {
          onProgress: this._makeProgressHandler(),
          onDone: this._makeOnDone("local"),
          onError: this._makeOnError(),
+         resumeAtPostId,
       });
    };
 
@@ -932,7 +943,7 @@ class CourseDashboard {
       return true;
    };
 
-   _onPickDrive = async () => {
+   _onPickDrive = async ({ resumeAtPostId = null } = {}) => {
       const ok = await this._connectDrive();
       if (!ok) return;
 
@@ -959,6 +970,7 @@ class CourseDashboard {
          onProgress: this._makeProgressHandler(),
          onDone: this._makeOnDone("drive"),
          onError: this._makeOnError(),
+         resumeAtPostId,
       });
    };
 

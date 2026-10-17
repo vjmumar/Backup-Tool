@@ -265,7 +265,30 @@ export const resolveFolder = async (token, segments) => {
 // ─── RESUMABLE UPLOAD ────────────────────────────────────────────────────────
 
 /**
+ * Searches for an existing file by name under parentId.
+ * Returns the file ID if found, null otherwise.
+ *
+ * @param {string} token
+ * @param {string} name
+ * @param {string} parentId
+ * @returns {Promise<string|null>}
+ */
+const findExistingFile = async (token, name, parentId) => {
+   const q = encodeURIComponent(
+      `name = ${JSON.stringify(name)} and '${parentId}' in parents and trashed = false and mimeType != 'application/vnd.google-apps.folder'`,
+   );
+   const res = await fetch(`${DRIVE_API}/files?q=${q}&fields=files(id)&pageSize=1`, {
+      headers: { Authorization: `Bearer ${token}` },
+   });
+   if (!res.ok) return null;
+   const { files } = await res.json();
+   return files.length ? files[0].id : null;
+};
+
+/**
  * Uploads a file to Drive using the resumable upload API.
+ * If a file with the same name already exists in parentId it is updated
+ * (upsert) — no duplicate files are created on repeated runs.
  * The body is streamed directly — large files never fully buffer in JS memory.
  *
  * @param {string} token
@@ -273,16 +296,30 @@ export const resolveFolder = async (token, segments) => {
  * @returns {{ ok: boolean, id?: string, error?: string }}
  */
 export const uploadFile = async (token, { name, parentId, mimeType, body, size }) => {
-   // First, initiate a resumable upload session to get a session URI
-   const initRes = await fetch(`${DRIVE_UPLOAD}/files?uploadType=resumable`, {
-      method: "POST",
+   // First, check for an existing file with this name in the parent folder
+   // so we can update it (PATCH) rather than create a duplicate (POST).
+   const existingId = await findExistingFile(token, name, parentId);
+
+   // Then, initiate a resumable upload session to get a session URI.
+   // Update path differs from create path when a file already exists.
+   const initUrl = existingId
+      ? `${DRIVE_UPLOAD}/files/${existingId}?uploadType=resumable`
+      : `${DRIVE_UPLOAD}/files?uploadType=resumable`;
+   const initMethod = existingId ? "PATCH" : "POST";
+   // On update we don't re-specify parents — file stays where it is
+   const initBody = existingId
+      ? JSON.stringify({ name })
+      : JSON.stringify({ name, parents: [parentId] });
+
+   const initRes = await fetch(initUrl, {
+      method: initMethod,
       headers: {
          Authorization: `Bearer ${token}`,
          "Content-Type": "application/json",
          "X-Upload-Content-Type": mimeType,
          ...(size != null ? { "X-Upload-Content-Length": String(size) } : {}),
       },
-      body: JSON.stringify({ name, parents: [parentId] }),
+      body: initBody,
    });
 
    if (!initRes.ok) {

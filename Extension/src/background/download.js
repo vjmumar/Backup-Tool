@@ -23,7 +23,7 @@ export const downloadFile = (url, filename) =>
       // First, start the download with saveAs:false so no dialog appears
       // (requires the user to have disabled "Ask where to save" in Chrome settings)
       chrome.downloads.download(
-         { url, filename, saveAs: false, conflictAction: "uniquify" },
+         { url, filename, saveAs: false, conflictAction: "overwrite" },
          (id) => {
             if (chrome.runtime.lastError || id === undefined) {
                return resolve({

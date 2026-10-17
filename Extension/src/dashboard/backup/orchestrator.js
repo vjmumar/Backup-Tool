@@ -41,7 +41,8 @@
 
 class BackupOrchestrator {
    constructor({ courses, selected, empties, writer, rootFolder,
-      onProgress, onDone, onError, onFileStatus, getFileStatus }) {
+      onProgress, onDone, onError, onFileStatus, getFileStatus,
+      resumeAtPostId }) {
       // First, the course data and selection state from the dashboard
       this.courses = courses;
       this.selected = selected;
@@ -50,8 +51,8 @@ class BackupOrchestrator {
       // Then, the destination writer — swapped out per destination
       this.writer = writer;
 
-      // Then, the root folder name (user-editable, defaults to "Kajabi Backup")
-      this.rootFolder = (rootFolder || "Kajabi Backup").trim() || "Kajabi Backup";
+      // Then, the root folder name (user-editable, defaults to "Course Backup")
+      this.rootFolder = (rootFolder || "Course Backup").trim() || "Course Backup";
 
       // Then, UI callbacks
       this.onProgress = onProgress || (() => { });
@@ -64,6 +65,11 @@ class BackupOrchestrator {
       // Files already "done" are skipped (counted as saved) without re-downloading
       this.onFileStatus = onFileStatus || (() => { });
       this.getFileStatus = getFileStatus || (() => undefined);
+
+      // Optional: when set, _buildQueue jumps directly to this post and skips
+      // _findResumePoint entirely. Used by the per-lesson retry button so only
+      // the retried lesson runs, not everything from the first failed file.
+      this.resumeAtPostId = resumeAtPostId || null;
 
       // Then, progress and summary counters
       this.total = 0;
@@ -174,6 +180,48 @@ class BackupOrchestrator {
       }
    };
 
+   // ─── RESUME POINT ────────────────────────────────────────────────────────────
+
+   /**
+    * Walks courses/categories/posts in the same order _buildQueue uses and
+    * returns the position of the first file whose status is "failed".
+    *
+    * Returned shape:
+    *   null                                — nothing failed, start from scratch
+    *   { courseId, categoryId, postId: null } — failed file is a category-level
+    *                                            file (thumbnail etc.)
+    *   { courseId, categoryId, postId }    — failed file is inside a lesson
+    *
+    * "First" means first in queue order, so skipping everything before it is safe.
+    */
+   _findResumePoint = () => {
+      for (const course of this.courses) {
+         for (const category of course.categories) {
+            const posts = category.posts || [];
+            const selPosts = posts.filter((p) => this.selected.has(p.id));
+            const isEmptySel = category.emptyId && this.selected.has(category.emptyId);
+            if (!isEmptySel && !selPosts.length) continue;
+
+            // Check category-level files first (thumbnail etc.)
+            for (const file of (category.files || [])) {
+               if (file.fileId && this.getFileStatus(file.fileId) === "failed") {
+                  return { courseId: course.id, categoryId: category.id, postId: null };
+               }
+            }
+
+            // Then check each lesson's files in order
+            for (const post of selPosts) {
+               for (const file of (post.files || [])) {
+                  if (file.fileId && this.getFileStatus(file.fileId) === "failed") {
+                     return { courseId: course.id, categoryId: category.id, postId: post.id };
+                  }
+               }
+            }
+         }
+      }
+      return null; // nothing failed — normal fresh run
+   };
+
    // ─── RUN ─────────────────────────────────────────────────────────────────────
 
    /**
@@ -212,6 +260,20 @@ class BackupOrchestrator {
    /**
     * Builds the flat ordered list of write tasks without executing any of them.
     * Course cover → category thumbnail → lesson content.txt → lesson media files.
+    *
+    * On resume, _findResumePoint() locates the first failed file in queue order.
+    * Everything before that point is skipped at the task-group level:
+    *   - Courses whose files are all done → skipped entirely
+    *   - Categories before the resume category → skipped entirely
+    *   - The resume category → header (thumbnail + category-info.txt) always
+    *     re-runs so the folder exists, then lessons before the resume lesson
+    *     are skipped, resume lesson and everything after runs normally
+    *   - Categories after the resume category → run fully from the top
+    *     (they haven't been touched yet)
+    *
+    * Individual _write calls still check getFileStatus so any "done" files
+    * inside the resumed lesson are skipped without re-downloading.
+    *
     * @returns {Array<() => Promise<void>>}
     */
    _buildQueue = () => {
@@ -237,18 +299,69 @@ class BackupOrchestrator {
          });
       };
 
+      // Pre-pass: find where the previous run broke off.
+      // resumeAtPostId is set by the per-lesson retry button — it means "jump
+      // straight to this post, skip _findResumePoint". Otherwise fall back to
+      // scanning for the first failed file in queue order.
+      // null means no failures → fresh run, include everything.
+      let rp = null;
+      if (this.resumeAtPostId) {
+         // Find which course + category owns this post so we can apply the
+         // same skip logic as a normal resume point.
+         outer: for (const course of this.courses) {
+            for (const category of course.categories) {
+               const selPosts = (category.posts || []).filter((p) => this.selected.has(p.id));
+               for (const post of selPosts) {
+                  if (String(post.id) === String(this.resumeAtPostId)) {
+                     rp = { courseId: course.id, categoryId: category.id, postId: post.id };
+                     break outer;
+                  }
+               }
+            }
+         }
+      } else {
+         rp = this._findResumePoint();
+      }
+
+      /**
+       * Returns true when every CDN file in a list is already "done".
+       * Used to decide whether a course cover or category can be skipped.
+       */
+      const allDone = (files = []) =>
+         files.length > 0 &&
+         files.every((f) => !f.url || !f.fileId || this.getFileStatus(f.fileId) === "done");
+
       const rootPath = `${this.rootFolder}/`;
 
       for (const course of this.courses) {
          const coursePath = `${rootPath}${this._safe(course.text)}/`;
          const courseCtx = { courseId: course.id };
 
-         // First, course cover image
-         for (const file of (course.files || [])) {
-            if (!file.url) continue;
-            const fileName = `cover${this._ext(file.url, ".jpg")}`;
-            push(`${coursePath}${fileName}`, file.url, courseCtx, fileName, file.fileId);
+         // ── Resume check: is this course at or after the resume point? ──────
+         // If we have a resume point and this course comes before it, its
+         // cover files are all "done" — skip the cover and move to categories.
+         const isResumeCourse = rp && course.id === rp.courseId;
+         const beforeResumeCourse = rp && !isResumeCourse &&
+            // courses are ordered; any course seen before we hit rp.courseId is before it
+            (() => {
+               for (const c of this.courses) {
+                  if (c.id === rp.courseId) return false;
+                  if (c.id === course.id) return true;
+               }
+               return false;
+            })();
+
+         // Course cover image — skip only when all covers are done
+         if (!beforeResumeCourse || !allDone(course.files || [])) {
+            for (const file of (course.files || [])) {
+               if (!file.url) continue;
+               const fileName = `cover${this._ext(file.url, ".jpg")}`;
+               push(`${coursePath}${fileName}`, file.url, courseCtx, fileName, file.fileId);
+            }
          }
+
+         // Track whether we have passed the resume category inside this course
+         let passedResumeCategory = !rp; // true from the start on a fresh run
 
          for (const category of course.categories) {
             const posts = category.posts || [];
@@ -259,20 +372,32 @@ class BackupOrchestrator {
             const catPath = `${coursePath}${this._safe(category.title)}/`;
             const catCtx = { courseId: course.id, categoryId: category.id };
 
-            // Then, category thumbnail
+            const isResumeCat = rp && course.id === rp.courseId && category.id === rp.categoryId;
+
+            if (isResumeCat) passedResumeCategory = true;
+
+            // ── Skip entire category when it comes before the resume category ──
+            // All its files are already "done" — nothing to write here.
+            if (!passedResumeCategory) continue;
+
+            // ── Category header ───────────────────────────────────────────────
+            // Always written for the resume category and every category after it.
+            // This ensures the folder exists even on a fresh resume.
+
+            // Category thumbnail
             for (const file of (category.files || [])) {
                if (!file.url) continue;
                const fileName = `thumbnail${this._ext(file.url, ".jpg")}`;
                push(`${catPath}${fileName}`, file.url, catCtx, fileName, file.fileId);
             }
 
-            // Then, category info — title and description if present
+            // Category info
             if (category.title || category.description) {
                const text = `Title: ${category.title || ""}\n\nDescription:\n${category.description || ""}`;
                pushBlob(`${catPath}category-info.txt`, text, catCtx, "category-info.txt");
             }
 
-            // For empty categories (no posts), write a placeholder so the folder is created
+            // Empty category placeholder
             if (isEmptySel && !selPosts.length) {
                pushBlob(`${catPath}empty-folder.txt`, "This folder was empty in Kajabi.", catCtx, "empty-folder.txt");
                pushSentinel(() => {
@@ -281,13 +406,26 @@ class BackupOrchestrator {
                });
             }
 
-            // Then, each selected lesson
+            // ── Lessons ───────────────────────────────────────────────────────
+            // Inside the resume category, skip lessons that come before the
+            // resume post — they are fully done. From the resume post onward,
+            // run everything normally (_write skips individual done files).
+
             let idx = 1;
             const pad = Math.max(2, String(selPosts.length).length);
+            let passedResumeLesson = !isResumeCat || rp.postId === null;
+            // postId === null means the failure was a category-level file,
+            // so all lessons in this category still need to run.
+
             for (const post of selPosts) {
                const lessonName = `${String(idx++).padStart(pad, "0")} - ${this._safe(post.title)}`;
                const lessonPath = `${catPath}${lessonName}/`;
                const lessonCtx = { courseId: course.id, categoryId: category.id, lessonId: post.id, lessonTitle: post.title };
+
+               if (!passedResumeLesson && post.id === rp.postId) passedResumeLesson = true;
+
+               // Skip lessons that are entirely before the resume post
+               if (!passedResumeLesson) continue;
 
                // content.txt
                if (post.title || post.body) {
