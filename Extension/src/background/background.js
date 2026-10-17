@@ -26,7 +26,7 @@ import { getConnections, createConnection, updateConnection, deleteConnection } 
 import { getLinks } from "./api/links.js";
 import { getScraperScript } from "./api/scrapers.js";
 import { getPlatforms } from "./api/platforms.js";
-import { getMaintenance } from "./api/maintenance.js";
+import { getAppConfig } from "./api/appConfig.js";
 
 // ─── ALLOWED ORIGINS ─────────────────────────────────────────────────────────
 
@@ -137,10 +137,19 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       // platform objects without any platform-specific code in the extension.
       "get-platforms": () => getPlatforms(),
 
-      // Maintenance — content script → background → API (no auth required)
+      // App config — content script → background → API (no auth required)
+      // Returns isMaintenance, version, downloadLink, and googleDrive credentials.
+      // Also injects the installed extension version from the manifest so MAIN
+      // world content scripts can do the version check without chrome.runtime access.
       // Checked before scraping and before adding a platform connection.
       // Fails open on network error so users are not blocked by a flaky connection.
-      "get-maintenance": () => getMaintenance(),
+      "get-app-config": async () => {
+         const config = await getAppConfig();
+         return {
+            ...config,
+            extensionVersion: chrome.runtime.getManifest().version,
+         };
+      },
    };
 
    const job = jobs[message.type];

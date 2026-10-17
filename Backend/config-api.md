@@ -2,19 +2,17 @@
 
 ## Overview
 
-The Config API returns a static configuration object used by the extension (e.g. Google Drive credentials, API keys). No database involved — all values live in a constant inside the controller. Requires authentication.
+All app configuration — including Google Drive credentials, the current version, the download link, and the maintenance flag — now lives in a single database-backed endpoint: `GET /api/config`.
+
+> **Breaking change:** The old separate endpoints `GET /api/config/maintenance` and `PATCH /api/config/maintenance` have been removed. `isMaintenance` is now part of the main config response. Update any code that was calling those endpoints.
 
 ---
 
-## Endpoint
+## GET /api/config
 
-### GET `/api/config`
+Returns the full app config. No authentication required.
 
-Returns the `CONFIG` constant object.
-
-**Auth:** Required (`authorizationx: Bearer <token>`)
-
-**Request body:** None
+**URL:** `GET /api/config`
 
 **Response**
 
@@ -23,37 +21,77 @@ Returns the `CONFIG` constant object.
   "message": "success",
   "data": {
     "googleDrive": {
-      "clientId": "your-client-id",
-      "clientSecret": "your-client-secret"
-    }
+      "clientId": "string | null",
+      "clientSecret": "string | null"
+    },
+    "version": "1.2.0",
+    "downloadLink": "https://...",
+    "isMaintenance": false
   }
 }
 ```
 
-**Error responses**
+All fields can be `null` if the server config has not been initialized yet.
 
-```json
-// 401 — missing or invalid token
-{ "message": "error", "data": { "message": "Unauthorized: missing or malformed token" } }
+---
 
-// 500 — unexpected error
-{ "message": "error", "data": { ... } }
+## Maintenance Mode
+
+`isMaintenance` is now returned as part of `GET /api/config` — there is no longer a separate maintenance endpoint.
+
+Check this flag on every extension startup (or poll periodically).
+
+```js
+const res = await fetch("https://your-api.com/api/config");
+const { data } = await res.json();
+
+if (data.isMaintenance === true) {
+  // block extension usage and show a maintenance screen
+}
 ```
 
 ---
 
-## Updating the Config
+## Version Check (Update Prompt)
 
-All values live in the `CONFIG` constant at the top of `src/controller/Config.ts`. Edit it directly — no schema changes, no environment variables, no migrations.
+Compare the extension's `manifest.json` version against `version` from the config response.
 
-```ts
-const CONFIG = {
-  googleDrive: {
-    clientId: "your-client-id",
-    clientSecret: "your-client-secret",
-  },
-  // add more keys as needed
-};
+```js
+const res = await fetch("https://your-api.com/api/config");
+const { data } = await res.json();
+
+const manifest = chrome.runtime.getManifest();
+
+if (manifest.version !== data.version) {
+  // show update prompt and direct the user to data.downloadLink
+}
+```
+
+- `version` — the latest version string set via the admin panel
+- `downloadLink` — direct download link for the latest version
+
+---
+
+## Recommended Startup Flow
+
+```js
+const res = await fetch("https://your-api.com/api/config");
+const { data } = await res.json();
+
+// 1. Check maintenance first
+if (data.isMaintenance) {
+  showMaintenanceScreen();
+  return;
+}
+
+// 2. Check for update
+const manifest = chrome.runtime.getManifest();
+if (manifest.version !== data.version) {
+  showUpdatePrompt(data.downloadLink);
+  return;
+}
+
+// 3. Proceed normally
 ```
 
 ---
@@ -62,6 +100,6 @@ const CONFIG = {
 
 | File | Purpose |
 |------|---------|
-| `src/controller/Config.ts` | Handler + `CONFIG` constant |
-| `src/route/Config.ts` | Mounts `GET /` → `getConfig` behind `verifyJwt` |
-| `src/index.ts` | Mounts router at `/api/config` |
+| `src/controller/Config.ts` | `getConfig` and `updateConfig` handlers |
+| `src/route/Config.ts` | Mounts `GET /` and `PATCH /` on `/api/config` |
+| `src/backdoor/index.html` | Admin panel — gear icon opens config modal to update all fields |

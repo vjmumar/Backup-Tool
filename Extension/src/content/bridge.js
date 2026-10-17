@@ -5,7 +5,7 @@
  * Messages are sent one after the other, so the courses arrive in order.
  */
 (() => {
-   const TYPES = ["handoff-start", "handoff-course", "handoff-end", "open-dashboard", "check-connection", "auth-get-token", "get-scraper", "get-platforms", "platform-create-connection", "platform-get-connections", "get-maintenance"];
+   const TYPES = ["handoff-start", "handoff-course", "handoff-end", "open-dashboard", "check-connection", "auth-get-token", "get-scraper", "get-platforms", "platform-create-connection", "platform-get-connections", "get-app-config"];
    let queue = Promise.resolve();
 
    // First, only accept messages sent by this same page and made for us

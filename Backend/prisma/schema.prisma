@@ -20,6 +20,18 @@ model User {
   platformConnections PlatformConnection[]
 }
 
+// Singleton config document — only one record should ever exist
+model AppConfig {
+  id                      String   @id @default(auto()) @map("_id") @db.ObjectId
+  version                 String   // e.g. "1.2.0" — clients compare their manifest version against this
+  downloadLink            String   // download link for the current version
+  isMaintenance           Boolean  @default(false)
+  googleDriveClientId     String
+  googleDriveClientSecret String
+  createdAt               DateTime @default(now())
+  updatedAt               DateTime @updatedAt
+}
+
 model PlatformConnection {
   id        String   @id @default(auto()) @map("_id") @db.ObjectId
   platform  String

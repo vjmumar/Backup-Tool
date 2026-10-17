@@ -67,9 +67,14 @@ export const inviteUser = async (
     });
 
     // Then — send the invite email with the temporary password
+    const appConfig = await prisma.appConfig.findFirst({ select: { downloadLink: true } });
+    const downloadLine = appConfig?.downloadLink
+      ? `\n\nTo download the extension, click here:\n${appConfig.downloadLink}`
+      : "";
+
     await sendEmail(
       email,
-      `You have been invited!\n\nYour temporary password is: ${tempPassword}\n\nPlease sign in and change your password immediately.\n\nTo download the extension, download it here:\nhttps://drive.google.com/file/d/1kpF7mehnm1Uu5WcYIyTZbAwpj4xBtaNR/view?usp=sharing`,
+      `You have been invited!\n\nYour temporary password is: ${tempPassword}\n\nPlease sign in and change your password immediately.${downloadLine}`,
       "no-reply@yourdomain.com",
       "You're invited"
     );

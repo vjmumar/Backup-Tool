@@ -64,7 +64,7 @@ button { font: inherit; color: inherit; cursor: pointer; }
 /* Buttons */
 .btn { border: 1px solid var(--line); background: var(--surface); border-radius: 9px; padding: 9px 16px; font-weight: 600; }
 .btn:hover { border-color: var(--muted); }
-.btn.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+.btn.primary { text-decoration: none !important; background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
 .btn.primary:hover { filter: brightness(1.08); }
 .btn:disabled { opacity: .45; cursor: not-allowed; filter: none; }
 
@@ -168,7 +168,7 @@ button { font: inherit; color: inherit; cursor: pointer; }
             <p>Reads your courses, lessons and files from Kajabi. Nothing is downloaded.</p>
             <button class="btn primary" data-act="scrape">Scrape courses</button>
          </div>`,
-      '<div class="muted">Not scanned yet.</div>',
+      '<div class="muted">Not scanned yet.</div><button class="btn" data-act="dashboard">Open dashboard</button>',
     );
   };
 
@@ -188,20 +188,24 @@ button { font: inherit; color: inherit; cursor: pointer; }
             <p class="scan-status">${esc(status || "Reading your courses, lessons and files. Nothing is downloaded yet.")}</p>
             <p class="warn-stay">⚠️ Keep this tab open and active while the scan runs.</p>
          </div>`,
-      '<div class="muted">Extracting courses...</div>',
+      '<div class="muted">Extracting courses...</div><button class="btn" data-act="dashboard">Open dashboard</button>',
     );
   };
 
   // The error state: the user can try again from here
   const showError = (error) => {
+    const msg = esc((error && error.message) || error);
+    const linkHtml = error?.downloadLink
+      ? `<a class="btn primary" href="${esc(error.downloadLink)}" target="_blank" rel="noopener noreferrer">Download update</a>`
+      : `<button class="btn primary" data-act="scrape">Try again</button>`;
     setView(
       "Something went wrong",
       `<div class="state">
             <strong>The courses could not be extracted</strong>
-            <p class="err">${esc((error && error.message) || error)}</p>
-            <button class="btn primary" data-act="scrape">Try again</button>
+            <p class="err">${msg}</p>
+            ${linkHtml}
          </div>`,
-      '<div class="muted">Nothing was saved.</div><button class="btn" data-act="close">Close</button>',
+      '<div class="muted">Nothing was saved.</div><button class="btn" data-act="dashboard">Open dashboard</button><button class="btn" data-act="close">Close</button>',
     );
   };
 

@@ -1,53 +1,98 @@
 import { Request, Response } from "express";
+import { prisma } from "../index";
 
-const CONFIG = {
-  googleDrive: {
-    clientId: "565945392484-u4fktod13ru0guk5sdi96v1ap7tnjv9f.apps.googleusercontent.com",
-    clientSecret: "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",
-  },
-};
+// Helper — always returns the single AppConfig record, or null if not yet seeded
+const getAppConfig = () => prisma.appConfig.findFirst();
 
-// Mutable maintenance flag — toggled via the backdoor panel
-let isMaintenance = false;
-
-// GET /api/config
+// GET /api/config — public, returns everything the client needs
 export const getConfig = async (req: Request, res: Response) => {
   try {
-    // Finally — return the config constant along with the maintenance flag
-    return res.status(200).json({ message: "success", data: { ...CONFIG, isMaintenance } });
+    const config = await getAppConfig();
+
+    return res.status(200).json({
+      message: "success",
+      data: {
+        googleDrive: {
+          clientId: config?.googleDriveClientId ?? null,
+          clientSecret: config?.googleDriveClientSecret ?? null,
+        },
+        version: config?.version ?? null,
+        downloadLink: config?.downloadLink ?? null,
+        isMaintenance: config?.isMaintenance ?? false,
+      },
+    });
   } catch (err) {
     return res.status(500).json({ message: "error", data: err, ...(err as object) });
   }
 };
 
-// GET /api/config/maintenance
-export const getMaintenance = async (req: Request, res: Response) => {
-  try {
-    return res.status(200).json({ message: "success", data: { isMaintenance } });
-  } catch (err) {
-    return res.status(500).json({ message: "error", data: err, ...(err as object) });
-  }
-};
-
-// PATCH /api/config/maintenance
-export const setMaintenance = async (
-  req: Request<unknown, unknown, { isMaintenance: boolean }>,
+// PATCH /api/config — create or update the singleton AppConfig
+export const updateConfig = async (
+  req: Request<
+    unknown,
+    unknown,
+    {
+      version?: string;
+      downloadLink?: string;
+      isMaintenance?: boolean;
+      googleDriveClientId?: string;
+      googleDriveClientSecret?: string;
+    }
+  >,
   res: Response
 ) => {
   try {
-    // First — validate the field
-    if (typeof req.body.isMaintenance !== "boolean") {
+    const { version, downloadLink, isMaintenance, googleDriveClientId, googleDriveClientSecret } = req.body;
+
+    // First — validate at least one field is provided
+    if (
+      version === undefined &&
+      downloadLink === undefined &&
+      isMaintenance === undefined &&
+      googleDriveClientId === undefined &&
+      googleDriveClientSecret === undefined
+    ) {
       return res.status(400).json({
         message: "error",
-        data: { message: "isMaintenance must be a boolean" },
+        data: { message: "At least one field is required" },
       });
     }
 
-    // Then — toggle the flag
-    isMaintenance = req.body.isMaintenance;
+    const existing = await getAppConfig();
+    let config;
 
-    // Finally — respond
-    return res.status(200).json({ message: "success", data: { isMaintenance } });
+    if (!existing) {
+      // No record yet — core fields required for first-time creation
+      if (!version || !downloadLink || !googleDriveClientId || !googleDriveClientSecret) {
+        return res.status(400).json({
+          message: "error",
+          data: { message: "version, downloadLink, googleDriveClientId, and googleDriveClientSecret are required when creating the config for the first time" },
+        });
+      }
+
+      config = await prisma.appConfig.create({
+        data: {
+          version,
+          downloadLink,
+          isMaintenance: isMaintenance ?? false,
+          googleDriveClientId,
+          googleDriveClientSecret,
+        },
+      });
+    } else {
+      config = await prisma.appConfig.update({
+        where: { id: existing.id },
+        data: {
+          ...(version !== undefined ? { version } : {}),
+          ...(downloadLink !== undefined ? { downloadLink } : {}),
+          ...(isMaintenance !== undefined ? { isMaintenance } : {}),
+          ...(googleDriveClientId !== undefined ? { googleDriveClientId } : {}),
+          ...(googleDriveClientSecret !== undefined ? { googleDriveClientSecret } : {}),
+        },
+      });
+    }
+
+    return res.status(200).json({ message: "success", data: config });
   } catch (err) {
     return res.status(500).json({ message: "error", data: err, ...(err as object) });
   }

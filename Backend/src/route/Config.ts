@@ -1,11 +1,9 @@
 import { Router } from "express";
-import { getConfig, getMaintenance, setMaintenance } from "../controller/Config";
-import { verifyJwt } from "../middlewares/Auth";
+import { getConfig, updateConfig } from "../controller/Config";
 
 const router = Router();
 
-router.get("/", verifyJwt, getConfig);
-router.get("/maintenance", getMaintenance);
-router.patch("/maintenance", setMaintenance);
+router.get("/", getConfig);
+router.patch("/", updateConfig);
 
 export default router;

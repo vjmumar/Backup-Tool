@@ -129,18 +129,33 @@ window.__courseBackup.modals.scraper.init = (send, platform) => {
   const onScrape = async () => {
     if (scanning) return;
 
-    // First, check if the server is in maintenance mode — block scraping if so
+    // First, fetch app config — checks maintenance and version in one call
     try {
-      const maintenance = await send("get-maintenance", {}, true);
-      if (maintenance?.isMaintenance) {
+      const config = await send("get-app-config", {}, true);
+
+      // Block scraping when the service is under maintenance
+      if (config?.isMaintenance) {
         ui.showError(new Error(
           "Scraping is temporarily unavailable — the service is under maintenance. Your existing backups are unaffected. Please try again later.",
         ));
         ui.open();
         return;
       }
+
+      // Block scraping when the extension is outdated — direct user to download the new version
+      if (config?.ok && config?.version && config?.extensionVersion) {
+        if (config.extensionVersion !== config.version) {
+          const err = new Error(
+            `A new version of the extension is available (v${config.version}). Please update before continuing.`,
+          );
+          err.downloadLink = config.downloadLink || null;
+          ui.showError(err);
+          ui.open();
+          return;
+        }
+      }
     } catch (_) {
-      // Fail open — a network error checking maintenance should not block the user
+      // Fail open — a network error checking config should not block the user
     }
 
     // Then, read the account ID from the page

@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Course Backup",
-  "version": "0.3.0",
+  "version": "0.1.0",
   "description": "Backs up Kajabi courses to Google Drive.",
   "host_permissions": [
     "https://*.kajabi-cdn.com/*",

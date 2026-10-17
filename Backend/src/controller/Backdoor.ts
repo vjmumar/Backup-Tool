@@ -1,7 +1,7 @@
 import { Request, Response } from "express";
 import path from "path";
 import { prisma } from "../index";
-import "dotenv/config"
+import "dotenv/config";
 
 // POST /api/backdoor/access — verify backdoor password
 export const verifyAccess = (req: Request<unknown, unknown, { password: string }>, res: Response) => {
@@ -18,7 +18,6 @@ export const getPanel = (req: Request, res: Response) => {
 // GET /api/backdoor/users — list all users
 export const getUsers = async (req: Request, res: Response) => {
   try {
-    // First — fetch all users
     const users = await prisma.user.findMany({
       select: {
         id: true,
@@ -32,7 +31,6 @@ export const getUsers = async (req: Request, res: Response) => {
       orderBy: { createdAt: "desc" },
     });
 
-    // Finally — respond
     return res.status(200).json({ message: "success", data: users });
   } catch (err) {
     return res.status(500).json({ message: "error", data: err, ...(err as object) });
@@ -45,7 +43,6 @@ export const updateUser = async (
   res: Response
 ) => {
   try {
-    // First — validate at least one field is provided
     const { connectionLimit, isActive } = req.body;
     if (connectionLimit === undefined && isActive === undefined) {
       return res.status(400).json({
@@ -54,7 +51,6 @@ export const updateUser = async (
       });
     }
 
-    // Then — confirm the user exists
     const user = await prisma.user.findUnique({ where: { id: req.params.id } });
     if (!user) {
       return res.status(404).json({
@@ -63,7 +59,6 @@ export const updateUser = async (
       });
     }
 
-    // Then — apply the update
     const updated = await prisma.user.update({
       where: { id: user.id },
       data: {
@@ -73,7 +68,6 @@ export const updateUser = async (
       select: { id: true, email: true, connectionLimit: true, isActive: true, updatedAt: true },
     });
 
-    // Finally — respond
     return res.status(200).json({ message: "success", data: updated });
   } catch (err) {
     return res.status(500).json({ message: "error", data: err, ...(err as object) });
@@ -86,7 +80,6 @@ export const deleteUser = async (
   res: Response
 ) => {
   try {
-    // First — confirm the user exists
     const user = await prisma.user.findUnique({ where: { id: req.params.id } });
     if (!user) {
       return res.status(404).json({
@@ -95,10 +88,8 @@ export const deleteUser = async (
       });
     }
 
-    // Then — delete the user
     await prisma.user.delete({ where: { id: user.id } });
 
-    // Finally — respond
     return res.status(200).json({ message: "success", data: null });
   } catch (err) {
     return res.status(500).json({ message: "error", data: err, ...(err as object) });

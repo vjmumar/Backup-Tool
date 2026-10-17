@@ -1,48 +1,70 @@
 /**
- * api/appConfig.js — Config API
+ * api/appConfig.js — App Config API
  *
- * Fetches the static server-side config object from the backend.
- * Auth is required — the JWT is read from chrome.storage.local via apiFetch.
+ * Fetches the full server-side config from GET /api/config.
+ * No authentication required — this endpoint is public.
  *
- * The config is cached in memory after the first successful fetch so
- * every Drive call in the same service-worker session uses one request.
- * The cache is intentionally never written to chrome.storage — if the
- * service worker restarts (idle timeout), the next call re-fetches fresh values.
+ * Returns all fields in one call:
+ *   googleDrive   — Drive OAuth credentials (clientId, clientSecret)
+ *   isMaintenance — when true, scraping and new connections are blocked
+ *   version       — latest extension version string (e.g. "1.2.0")
+ *   downloadLink  — direct download URL for the latest extension build
+ *
+ * NOT cached — isMaintenance and version must always be fresh so callers
+ * see the current server state on every check.
  *
  * Backend response shape:
- *   { message: "success", data: { googleDrive: { clientId, clientSecret } } }
+ *   {
+ *     message: "success",
+ *     data: {
+ *       googleDrive:   { clientId: string|null, clientSecret: string|null },
+ *       version:       string|null,
+ *       downloadLink:  string|null,
+ *       isMaintenance: boolean
+ *     }
+ *   }
  */
 
-import { BASE_URL, apiFetch } from "./config.js";
+import { BASE_URL } from "./config.js";
 
-// ─── CACHE ────────────────────────────────────────────────────────────────────
-
-// In-memory cache — lives for the lifetime of the service worker instance
-let _cachedConfig = null;
-
-// ─── GET CONFIG ───────────────────────────────────────────────────────────────
+// ─── GET APP CONFIG ───────────────────────────────────────────────────────────
 
 /**
- * Returns the full config object from the backend.
- * Fetches once per service-worker session, then returns the cached value.
+ * Fetches the full app config from the backend.
+ * Resolves (never rejects) so callers can safely check without try/catch.
  *
- * @returns {{ ok: boolean, googleDrive?: { clientId: string, clientSecret: string }, error?: string }}
+ * @returns {Promise<{
+ *   ok: boolean,
+ *   googleDrive?: { clientId: string, clientSecret: string },
+ *   isMaintenance?: boolean,
+ *   version?: string,
+ *   downloadLink?: string,
+ *   error?: string
+ * }>}
  */
 export const getAppConfig = async () => {
-   // First, return the cached value if we already have it
-   if (_cachedConfig) return { ok: true, ..._cachedConfig };
+   try {
+      const res = await fetch(`${BASE_URL}/api/config`);
+      const json = await res.json().catch(() => ({}));
 
-   // Then, fetch from the backend
-   const result = await apiFetch(`${BASE_URL}/api/config`, {
-      method: "GET",
-      auth: true,
-   });
+      if (!res.ok) {
+         const reason = json?.data?.message || json?.message || `HTTP ${res.status}`;
+         return { ok: false, error: reason };
+      }
 
-   if (!result.ok) return result;
+      const data = json.data || {};
+      return {
+         ok: true,
+         googleDrive: data.googleDrive ?? null,
+         isMaintenance: !!(data.isMaintenance),
+         version: data.version ?? null,
+         downloadLink: data.downloadLink ?? null,
+      };
 
-   // Finally, cache and return
-   _cachedConfig = result;
-   return { ok: true, ..._cachedConfig };
+   } catch (err) {
+      // Network failure — return a safe default so callers can fail open
+      return { ok: false, error: err?.message || "Network error." };
+   }
 };
 
 // ─── GET DRIVE CREDENTIALS ────────────────────────────────────────────────────

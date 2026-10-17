@@ -33,6 +33,8 @@
       color: #e2e8f0;
       font-size: 14px;
       width: 260px;
+      height: 42px;
+      max-height: 42px;
       outline: none;
     }
 
@@ -61,6 +63,25 @@
     .badge.on  { background: #dc2626; color: #fff; }
     .badge.off { background: #166534; color: #bbf7d0; }
 
+    /* Gear icon button */
+    #gear-btn {
+      background: #1e2330;
+      border: 1px solid #2d3748;
+      border-radius: 8px;
+      width: 38px;
+      height: 38px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      transition: border-color .15s, background .15s;
+      font-size: 18px;
+      padding: 0;
+      color: #ffffff;
+    }
+
+    #gear-btn:hover { border-color: #6366f1; background: #252d3d; }
+
     .section {
       background: #1e2330;
       border: 1px solid #2d3748;
@@ -85,7 +106,7 @@
       flex-wrap: wrap;
     }
 
-    input[type="text"], input[type="email"], input[type="number"] {
+    input[type="text"], input[type="email"], input[type="number"], input[type="password"] {
       padding: 8px 12px;
       background: #0f1117;
       border: 1px solid #2d3748;
@@ -182,12 +203,7 @@
       font-size: 12px;
     }
 
-    #maintenance-toggle {
-      display: flex;
-      align-items: center;
-      gap: 16px;
-    }
-
+    /* Toggle switch */
     .switch {
       position: relative;
       display: inline-block;
@@ -220,6 +236,77 @@
 
     input:checked + .slider { background: #dc2626; }
     input:checked + .slider:before { transform: translateX(20px); }
+
+    /* ── Config Modal ───────────────────────────────────────────────────────── */
+
+    #modal-overlay {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,.6);
+      backdrop-filter: blur(2px);
+      z-index: 100;
+      align-items: center;
+      justify-content: center;
+    }
+
+    #modal-overlay.open { display: flex; }
+
+    #config-modal {
+      background: #1e2330;
+      border: 1px solid #2d3748;
+      border-radius: 14px;
+      padding: 28px;
+      width: 100%;
+      max-width: 480px;
+      display: flex;
+      flex-direction: column;
+      gap: 20px;
+    }
+
+    #config-modal h2 {
+      font-size: 16px;
+      font-weight: 700;
+      color: #e2e8f0;
+    }
+
+    .modal-field {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+
+    .modal-field label {
+      font-size: 12px;
+      font-weight: 600;
+      color: #94a3b8;
+      text-transform: uppercase;
+      letter-spacing: .04em;
+    }
+
+    .modal-field input {
+      width: 100%;
+      min-width: unset;
+      flex: unset;
+    }
+
+    .modal-maint-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    .modal-maint-row span {
+      font-size: 13px;
+      color: #e2e8f0;
+    }
+
+    .modal-footer {
+      display: flex;
+      justify-content: flex-end;
+      gap: 10px;
+      padding-top: 4px;
+    }
   </style>
 </head>
 <body>
@@ -236,19 +323,12 @@
 <div id="app">
   <header>
     <h1>⚙️ Admin Backdoor</h1>
-    <div id="maintenance-toggle">
-      <span id="maint-label">Maintenance: <strong>OFF</strong></span>
-      <label class="switch">
-        <input type="checkbox" id="maint-checkbox" onchange="toggleMaintenance(this.checked)" />
-        <span class="slider"></span>
-      </label>
-      <span id="maint-badge" class="badge off">OFF</span>
-    </div>
+    <button id="gear-btn" onclick="openConfigModal()" title="App Config">⚙</button>
   </header>
 
   <!-- Invite user -->
   <div class="section">
-    <h2>Invite New User</h2>
+    <h2>Invite / Top-up User</h2>
     <div class="row">
       <input type="email" id="invite-email" placeholder="Email address" />
       <input type="number" id="invite-limit" placeholder="Connection limit (default 3)" min="1" />
@@ -271,9 +351,54 @@
         </tr>
       </thead>
       <tbody id="users-tbody">
-        <tr><td colspan="5" style="color:#64748b">Loading…</td></tr>
+        <tr><td colspan="6" style="color:#64748b">Loading…</td></tr>
       </tbody>
     </table>
+  </div>
+</div>
+
+<!-- Config Modal -->
+<div id="modal-overlay" onclick="handleOverlayClick(event)">
+  <div id="config-modal">
+    <h2>⚙ App Config</h2>
+
+    <div class="modal-field">
+      <label>Version</label>
+      <input type="text" id="cfg-version" placeholder="e.g. 1.2.0" />
+    </div>
+
+    <div class="modal-field">
+      <label>Download Link</label>
+      <input type="text" id="cfg-download-link" placeholder="https://..." />
+    </div>
+
+    <div class="modal-field">
+      <label>Google Drive Client ID</label>
+      <input type="text" id="cfg-gdrive-id" placeholder="Client ID" />
+    </div>
+
+    <div class="modal-field">
+      <label>Google Drive Client Secret</label>
+      <input type="text" id="cfg-gdrive-secret" placeholder="Client Secret" />
+    </div>
+
+    <div class="modal-field">
+      <div class="modal-maint-row">
+        <span>Maintenance Mode</span>
+        <div style="display:flex;align-items:center;gap:10px">
+          <span id="modal-maint-badge" class="badge off">OFF</span>
+          <label class="switch">
+            <input type="checkbox" id="modal-maint-checkbox" />
+            <span class="slider"></span>
+          </label>
+        </div>
+      </div>
+    </div>
+
+    <div class="modal-footer">
+      <button class="btn-secondary" onclick="closeConfigModal()">Cancel</button>
+      <button class="btn-primary" onclick="saveConfig()">Save</button>
+    </div>
   </div>
 </div>
 
@@ -324,42 +449,80 @@
   // ── Load all ───────────────────────────────────────────────────────────────
 
   async function loadAll() {
-    await Promise.all([loadUsers(), loadMaintenance()]);
+    await Promise.all([loadUsers()]);
   }
 
-  // ── Maintenance ────────────────────────────────────────────────────────────
+  // ── Config Modal ───────────────────────────────────────────────────────────
 
-  async function loadMaintenance() {
+  async function openConfigModal() {
+    // Load current config and pre-fill the modal
     try {
-      const res = await fetch(`${BASE}/api/config/maintenance`);
+      const res = await fetch(`${BASE}/api/config`);
       const json = await res.json();
-      setMaintenanceUI(json.data.isMaintenance);
+      const d = json.data ?? {};
+
+      document.getElementById("cfg-version").value       = d.version ?? "";
+      document.getElementById("cfg-download-link").value = d.downloadLink ?? "";
+      document.getElementById("cfg-gdrive-id").value     = d.googleDrive?.clientId ?? "";
+      document.getElementById("cfg-gdrive-secret").value = d.googleDrive?.clientSecret ?? ""; 
+
+      const maint = d.isMaintenance ?? false;
+      document.getElementById("modal-maint-checkbox").checked = maint;
+      setModalMaintenanceBadge(maint);
+
+      document.getElementById("modal-maint-checkbox").onchange = (e) => {
+        setModalMaintenanceBadge(e.target.checked);
+      };
     } catch {
-      toast("Failed to load maintenance status", "err");
+      toast("Failed to load current config", "err");
     }
+
+    document.getElementById("modal-overlay").classList.add("open");
   }
 
-  function setMaintenanceUI(value) {
-    document.getElementById("maint-checkbox").checked = value;
-    const badge = document.getElementById("maint-badge");
-    const label = document.getElementById("maint-label");
+  function setModalMaintenanceBadge(value) {
+    const badge = document.getElementById("modal-maint-badge");
     badge.textContent = value ? "ON" : "OFF";
     badge.className = `badge ${value ? "on" : "off"}`;
-    label.innerHTML = `Maintenance: <strong>${value ? "ON" : "OFF"}</strong>`;
   }
 
-  async function toggleMaintenance(value) {
+  function closeConfigModal() {
+    document.getElementById("modal-overlay").classList.remove("open");
+  }
+
+  function handleOverlayClick(e) {
+    if (e.target === document.getElementById("modal-overlay")) closeConfigModal();
+  }
+
+  async function saveConfig() {
+    const version                 = document.getElementById("cfg-version").value.trim();
+    const downloadLink            = document.getElementById("cfg-download-link").value.trim();
+    const googleDriveClientId     = document.getElementById("cfg-gdrive-id").value.trim();
+    const googleDriveClientSecret = document.getElementById("cfg-gdrive-secret").value.trim();
+    const isMaintenance           = document.getElementById("modal-maint-checkbox").checked;
+
+    const body = { isMaintenance };
+    if (version)                  body.version = version;
+    if (downloadLink)             body.downloadLink = downloadLink;
+    if (googleDriveClientId)      body.googleDriveClientId = googleDriveClientId;
+    if (googleDriveClientSecret)  body.googleDriveClientSecret = googleDriveClientSecret;
+
     try {
-      const res = await fetch(`${BASE}/api/config/maintenance`, {
+      const res = await fetch(`${BASE}/api/config`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ isMaintenance: value }),
+        body: JSON.stringify(body),
       });
       const json = await res.json();
-      setMaintenanceUI(json.data.isMaintenance);
-      toast(`Maintenance mode ${value ? "enabled" : "disabled"}`);
+
+      if (json.message === "success") {
+        toast("Config saved");
+        closeConfigModal();
+      } else {
+        toast(json.data?.message || "Save failed", "err");
+      }
     } catch {
-      toast("Failed to toggle maintenance", "err");
+      toast("Request failed", "err");
     }
   }
 
@@ -450,7 +613,7 @@
         loadUsers();
       } else {
         toast(json.data?.message || "Update failed", "err");
-        loadUsers(); // revert toggle
+        loadUsers();
       }
     } catch {
       toast("Request failed", "err");
