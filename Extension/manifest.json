@@ -10,19 +10,19 @@
   ],
   "permissions": ["storage", "identity", "downloads"],
   "icons": {
-    "16":  "icon.png",
-    "32":  "icon.png",
-    "48":  "icon.png",
-    "128": "icon.png"
+    "16":  "icon-transparent.png",
+    "32":  "icon-transparent.png",
+    "48":  "icon-transparent.png",
+    "128": "icon-transparent.png"
   },
   "action": {
     "default_popup": "src/popup/popup.html",
     "default_title": "Course Backup",
     "default_icon": {
-      "16":  "icon.png",
-      "32":  "icon.png",
-      "48":  "icon.png",
-      "128": "icon.png"
+      "16":  "icon-transparent.png",
+      "32":  "icon-transparent.png",
+      "48":  "icon-transparent.png",
+      "128": "icon-transparent.png"
     }
   },
   "background": { "service_worker": "src/background/background.js", "type": "module" },
