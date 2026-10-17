@@ -59,6 +59,7 @@ export const getAppConfig = async () => {
          isMaintenance: !!(data.isMaintenance),
          version: data.version ?? null,
          downloadLink: data.downloadLink ?? null,
+         purchaseLink: data.purchaseLink ?? null,
       };
 
    } catch (err) {

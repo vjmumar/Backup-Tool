@@ -124,7 +124,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       },
 
       // Links — popup → background → API (no auth required)
-      // purchaseLink now comes from GET /api/config — no separate links endpoint.
+      // purchaseLink and downloadLink both come from GET /api/config.
       "get-links": () => getAppConfig(),
 
       // Scrapers — content script → background → API
