@@ -5,7 +5,6 @@ import { PrismaClient } from "@prisma/client";
 
 import AuthRouter from "./route/Auth";
 import PlatformConnectionRouter from "./route/PlatformConnection";
-import LinksRouter from "./route/Links";
 import InviteUserRouter from "./route/InviteUser";
 import ScrapersRouter from "./route/Scrapers";
 import ConfigRouter from "./route/Config";
@@ -28,7 +27,6 @@ app.use(express.json());
 // Route mounts
 app.use("/api/auth", AuthRouter);
 app.use("/api/platform-connections", PlatformConnectionRouter);
-app.use("/api/links", LinksRouter);
 app.use("/api/invite-user", InviteUserRouter);
 app.use("/api/scrapers", ScrapersRouter);
 app.use("/api/config", ConfigRouter);

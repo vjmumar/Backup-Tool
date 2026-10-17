@@ -2,9 +2,11 @@
 
 ## Overview
 
-All app configuration — including Google Drive credentials, the current version, the download link, and the maintenance flag — now lives in a single database-backed endpoint: `GET /api/config`.
+All app configuration lives in a single endpoint: `GET /api/config`. This includes Google Drive credentials, versioning, download/purchase links, and the maintenance flag.
 
-> **Breaking change:** The old separate endpoints `GET /api/config/maintenance` and `PATCH /api/config/maintenance` have been removed. `isMaintenance` is now part of the main config response. Update any code that was calling those endpoints.
+> **Breaking change:** The old `GET /api/links` endpoint has been removed. `purchaseLink` and `otherLinks` are now part of the main config response. Update any code that was calling `/api/links`.
+
+> **Breaking change:** The old `GET /api/config/maintenance` and `PATCH /api/config/maintenance` endpoints have been removed. `isMaintenance` is now part of the main config response.
 
 ---
 
@@ -26,20 +28,20 @@ Returns the full app config. No authentication required.
     },
     "version": "1.2.0",
     "downloadLink": "https://...",
+    "purchaseLink": "https://...",
+    "otherLinks": "https://...",
     "isMaintenance": false
   }
 }
 ```
 
-All fields can be `null` if the server config has not been initialized yet.
+All fields can be `null` or empty string if the server config has not been initialized yet.
 
 ---
 
 ## Maintenance Mode
 
-`isMaintenance` is now returned as part of `GET /api/config` — there is no longer a separate maintenance endpoint.
-
-Check this flag on every extension startup (or poll periodically).
+Check `isMaintenance` on every extension startup (or poll periodically).
 
 ```js
 const res = await fetch("https://your-api.com/api/config");
@@ -72,6 +74,20 @@ if (manifest.version !== data.version) {
 
 ---
 
+## Links
+
+```js
+const res = await fetch("https://your-api.com/api/config");
+const { data } = await res.json();
+
+data.purchaseLink  // link to purchase or subscribe
+data.otherLinks    // any other relevant link
+```
+
+These were previously served from `GET /api/links`. Use `data.purchaseLink` and `data.otherLinks` from the config response instead.
+
+---
+
 ## Recommended Startup Flow
 
 ```js
@@ -91,15 +107,5 @@ if (manifest.version !== data.version) {
   return;
 }
 
-// 3. Proceed normally
+// 3. Proceed normally — links available at data.purchaseLink and data.otherLinks
 ```
-
----
-
-## Files
-
-| File | Purpose |
-|------|---------|
-| `src/controller/Config.ts` | `getConfig` and `updateConfig` handlers |
-| `src/route/Config.ts` | Mounts `GET /` and `PATCH /` on `/api/config` |
-| `src/backdoor/index.html` | Admin panel — gear icon opens config modal to update all fields |

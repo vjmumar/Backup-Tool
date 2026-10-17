@@ -23,7 +23,6 @@ import { connectDrive, disconnectDrive, getDriveState, driveUploadFile, getDrive
 import { saveToken, clearToken, loadToken } from "./api/config.js";
 import { signIn, changePassword, getMe, updateEmail, deleteAccount, forgotPassword } from "./api/auth.js";
 import { getConnections, createConnection, updateConnection, deleteConnection } from "./api/platform.js";
-import { getLinks } from "./api/links.js";
 import { getScraperScript } from "./api/scrapers.js";
 import { getPlatforms } from "./api/platforms.js";
 import { getAppConfig } from "./api/appConfig.js";
@@ -125,7 +124,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       },
 
       // Links — popup → background → API (no auth required)
-      "get-links": () => getLinks(),
+      // purchaseLink now comes from GET /api/config — no separate links endpoint.
+      "get-links": () => getAppConfig(),
 
       // Scrapers — content script → background → API
       // Fetches the raw script text for a named scraper.

@@ -373,6 +373,11 @@
     </div>
 
     <div class="modal-field">
+      <label>Purchase Link</label>
+      <input type="text" id="cfg-purchase-link" placeholder="https://..." />
+    </div>
+
+    <div class="modal-field">
       <label>Google Drive Client ID</label>
       <input type="text" id="cfg-gdrive-id" placeholder="Client ID" />
     </div>
@@ -461,10 +466,11 @@
       const json = await res.json();
       const d = json.data ?? {};
 
-      document.getElementById("cfg-version").value       = d.version ?? "";
-      document.getElementById("cfg-download-link").value = d.downloadLink ?? "";
-      document.getElementById("cfg-gdrive-id").value     = d.googleDrive?.clientId ?? "";
-      document.getElementById("cfg-gdrive-secret").value = d.googleDrive?.clientSecret ?? ""; 
+      document.getElementById("cfg-version").value        = d.version ?? "";
+      document.getElementById("cfg-download-link").value  = d.downloadLink ?? "";
+      document.getElementById("cfg-purchase-link").value  = d.purchaseLink ?? "";
+      document.getElementById("cfg-gdrive-id").value      = d.googleDrive?.clientId ?? "";
+      document.getElementById("cfg-gdrive-secret").value  = d.googleDrive?.clientSecret ?? "";
 
       const maint = d.isMaintenance ?? false;
       document.getElementById("modal-maint-checkbox").checked = maint;
@@ -497,6 +503,7 @@
   async function saveConfig() {
     const version                 = document.getElementById("cfg-version").value.trim();
     const downloadLink            = document.getElementById("cfg-download-link").value.trim();
+    const purchaseLink            = document.getElementById("cfg-purchase-link").value.trim();
     const googleDriveClientId     = document.getElementById("cfg-gdrive-id").value.trim();
     const googleDriveClientSecret = document.getElementById("cfg-gdrive-secret").value.trim();
     const isMaintenance           = document.getElementById("modal-maint-checkbox").checked;
@@ -504,6 +511,7 @@
     const body = { isMaintenance };
     if (version)                  body.version = version;
     if (downloadLink)             body.downloadLink = downloadLink;
+    if (purchaseLink)             body.purchaseLink = purchaseLink;
     if (googleDriveClientId)      body.googleDriveClientId = googleDriveClientId;
     if (googleDriveClientSecret)  body.googleDriveClientSecret = googleDriveClientSecret;
 

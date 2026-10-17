@@ -25,6 +25,7 @@ model AppConfig {
   id                      String   @id @default(auto()) @map("_id") @db.ObjectId
   version                 String   // e.g. "1.2.0" — clients compare their manifest version against this
   downloadLink            String   // download link for the current version
+  purchaseLink            String   // link to purchase/subscribe
   isMaintenance           Boolean  @default(false)
   googleDriveClientId     String
   googleDriveClientSecret String

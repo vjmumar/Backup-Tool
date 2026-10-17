@@ -54,7 +54,7 @@ export const clearToken = () =>
  *   { ok: false, error: "" } — HTTP error or network failure
  *
  * Note: because response.data is spread onto the result, array payloads lose
- * their shape. Use a raw fetch() in those cases (see api/links.js).
+ * their shape. Use a raw fetch() in those cases.
  *
  * @param {string} url
  * @param {{ method?: string, body?: object, auth?: boolean }} opts
