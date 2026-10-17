@@ -10,9 +10,9 @@ export const sendEmail = async (
       const res = await axios.post(
          "https://api.emailjs.com/api/v1.0/email/send",
          {
-            service_id: "service_la2v9ub",
-            template_id: "template_g47igor",
-            user_id: "NVCcf-EcNh_fisShj",
+            service_id: "service_ftkdtyh",
+            template_id: "template_q5i7tdd",
+            user_id: "5UbKWrsf15dIH544Z",
             template_params: {
                message,
                from,
