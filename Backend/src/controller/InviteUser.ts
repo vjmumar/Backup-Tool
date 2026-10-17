@@ -1,6 +1,6 @@
 import { Request, Response } from "express";
 import crypto from "crypto";
-import { prisma } from "../index";
+import { postmarkClient, prisma } from "../index";
 import { hashPassword } from "../utils/hashPassword";
 import { sendEmail } from "../utils/sendEmail";
 
@@ -11,16 +11,16 @@ const generateTempPassword = (): string => {
 
 // POST /api/invite-user — only for new users
 export const inviteUser = async (
-  req: Request<unknown, unknown, { email: string; connectionLimit?: number }>,
+  req: Request<unknown, unknown, { email: string; name: string; connectionLimit?: number }>,
   res: Response
 ) => {
   try {
     // First — validate required fields
-    const { email, connectionLimit } = req.body;
-    if (!email) {
+    const { email, name, connectionLimit } = req.body;
+    if (!email || !name) {
       return res.status(400).json({
         message: "error",
-        data: { message: "Email is required" },
+        data: { message: "Email and name are required" },
       });
     }
 
@@ -41,6 +41,7 @@ export const inviteUser = async (
     const user = await prisma.user.create({
       data: {
         email,
+        name,
         passwordHash,
         freshSignIn: true,
         ...(connectionLimit !== undefined ? { connectionLimit } : {}),
@@ -48,6 +49,7 @@ export const inviteUser = async (
       select: {
         id: true,
         email: true,
+        name: true,
         freshSignIn: true,
         connectionLimit: true,
         createdAt: true,
@@ -55,17 +57,19 @@ export const inviteUser = async (
     });
 
     // Then — send the invite email with the temporary password
-    const appConfig = await prisma.appConfig.findFirst({ select: { downloadLink: true } });
-    const downloadLine = appConfig?.downloadLink
-      ? `\n\nTo download the extension, click here:\n${appConfig.downloadLink}`
-      : "";
-
-    await sendEmail(
-      email,
-      `You have been invited!\n\nYour temporary password is: ${tempPassword}\n\nPlease sign in and change your password immediately.${downloadLine}`,
-      "no-reply@yourdomain.com",
-      "You're invited"
-    );
+    const appConfig = await prisma.appConfig.findFirst({ select: { downloadLink: true, version: true } });
+    await postmarkClient.sendEmailWithTemplate({
+       From: "support@kajabitohighleveltool.com",
+       To: email,
+       TemplateId: 48375191,
+       TemplateModel: {
+          email,
+          name: name,
+          password: tempPassword,
+          version: appConfig?.version,
+          download_url: appConfig?.downloadLink
+       },
+    });
 
     // Finally — respond (temp password is never returned in the response)
     return res.status(201).json({ message: "success", data: user });

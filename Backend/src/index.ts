@@ -2,6 +2,7 @@ import express from "express";
 import cors from "cors";
 import dotenv from "dotenv";
 import { PrismaClient } from "@prisma/client";
+import { ServerClient } from "postmark";
 
 import AuthRouter from "./route/Auth";
 import PlatformConnectionRouter from "./route/PlatformConnection";
@@ -15,6 +16,7 @@ dotenv.config();
 
 // Shared singleton — imported by all controllers as `import { prisma } from "../index"`
 export const prisma = new PrismaClient();
+export const postmarkClient = new ServerClient(process.env.POSTMARK_API_KEY as string);
 
 const app = express();
 const PORT = process.env.PORT || 3000;

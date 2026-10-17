@@ -22,6 +22,7 @@ export const getUsers = async (req: Request, res: Response) => {
       select: {
         id: true,
         email: true,
+        name: true,
         freshSignIn: true,
         isActive: true,
         connectionLimit: true,
