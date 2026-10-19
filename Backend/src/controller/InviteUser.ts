@@ -57,7 +57,7 @@ export const inviteUser = async (
     });
 
     // Then — send the invite email with the temporary password
-    const appConfig = await prisma.appConfig.findFirst({ select: { downloadLink: true, version: true } });
+    const appConfig = await prisma.appConfig.findFirst({ select: { downloadLink: true, version: true, setupLink: true } });
     await postmarkClient.sendEmailWithTemplate({
        From: "support@kajabitohighleveltool.com",
        To: email,
@@ -67,7 +67,8 @@ export const inviteUser = async (
           name: name,
           password: tempPassword,
           version: appConfig?.version,
-          download_url: appConfig?.downloadLink
+          download_url: appConfig?.downloadLink,
+          setup_url: appConfig?.setupLink
        },
     });
 

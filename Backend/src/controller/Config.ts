@@ -18,6 +18,7 @@ export const getConfig = async (req: Request, res: Response) => {
         },
         version: config?.version ?? null,
         downloadLink: config?.downloadLink ?? null,
+        setupLink: config?.setupLink ?? null,
         purchaseLink: config?.purchaseLink ?? null,
         isMaintenance: config?.isMaintenance ?? false,
       },
@@ -35,6 +36,7 @@ export const updateConfig = async (
     {
       version?: string;
       downloadLink?: string;
+      setupLink?: string;
       purchaseLink?: string;
       isMaintenance?: boolean;
       googleDriveClientId?: string;
@@ -44,12 +46,13 @@ export const updateConfig = async (
   res: Response
 ) => {
   try {
-    const { version, downloadLink, purchaseLink, isMaintenance, googleDriveClientId, googleDriveClientSecret } = req.body;
+    const { version, downloadLink, setupLink, purchaseLink, isMaintenance, googleDriveClientId, googleDriveClientSecret } = req.body;
 
     // First — validate at least one field is provided
     if (
       version === undefined &&
       downloadLink === undefined &&
+      setupLink === undefined &&
       purchaseLink === undefined &&
       isMaintenance === undefined &&
       googleDriveClientId === undefined &&
@@ -77,6 +80,7 @@ export const updateConfig = async (
         data: {
           version,
           downloadLink,
+          setupLink: setupLink ?? "",
           purchaseLink: purchaseLink ?? "",
           isMaintenance: isMaintenance ?? false,
           googleDriveClientId,
@@ -89,6 +93,7 @@ export const updateConfig = async (
         data: {
           ...(version !== undefined ? { version } : {}),
           ...(downloadLink !== undefined ? { downloadLink } : {}),
+          ...(setupLink !== undefined ? { setupLink } : {}),
           ...(purchaseLink !== undefined ? { purchaseLink } : {}),
           ...(isMaintenance !== undefined ? { isMaintenance } : {}),
           ...(googleDriveClientId !== undefined ? { googleDriveClientId } : {}),
