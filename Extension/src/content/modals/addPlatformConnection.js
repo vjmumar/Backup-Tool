@@ -84,10 +84,10 @@ const _renderAPC = ({ platformName, accountId, loading, error, success }) => {
  * @param {string}   accountId     the account ID to save as lockId
  */
 const _confirmAPC = async (send, platformName, accountId) => {
-  // First, check maintenance — adding connections is a server-dependent action
+  // First, check app config — block if maintenance is on
   try {
-    const maintenance = await send("get-maintenance", {}, true);
-    if (maintenance?.isMaintenance) {
+    const config = await send("get-app-config", {}, true);
+    if (config?.isMaintenance) {
       _renderAPC({
         platformName,
         accountId,
@@ -109,12 +109,9 @@ const _confirmAPC = async (send, platformName, accountId) => {
     true,
   );
 
-  // Finally, show success or surface the error
+  // Finally, show success or surface the error — re-wire the button if showing error
   if (result.ok) {
-    // First, refresh the user's connections in the background so the
-    // check-connection cache is up to date for the next scrape attempt
     await send("platform-get-connections", {}, true).catch(() => { });
-    // Then, show the success state
     _renderAPC({ platformName, accountId, success: true });
   } else {
     _renderAPC({
@@ -122,7 +119,32 @@ const _confirmAPC = async (send, platformName, accountId) => {
       accountId,
       error: result.error || "Could not add connection. Please try again.",
     });
+    // Re-attach the listener since _renderAPC rebuilt the DOM
+    _wireApcBtn(send, platformName, accountId);
   }
+};
+
+// ─── WIRE BUTTON ─────────────────────────────────────────────────────────────
+
+/**
+ * Finds the #apc-confirm-btn in the current modal body and attaches a
+ * one-time click listener. Called after every render that shows the button
+ * (initial idle state and error state after a failed attempt).
+ */
+const _wireApcBtn = (send, platformName, accountId) => {
+  const { ui } = window.__courseBackup;
+  const btn = ui.getBody()?.querySelector("#apc-confirm-btn");
+  if (!btn) return;
+  let _busy = false;
+  btn.addEventListener("click", async () => {
+    if (_busy) return;
+    _busy = true;
+    try {
+      await _confirmAPC(send, platformName, accountId);
+    } finally {
+      _busy = false;
+    }
+  });
 };
 
 // ─── SHOW ─────────────────────────────────────────────────────────────────────
@@ -142,21 +164,7 @@ window.__courseBackup.modals.addPlatformConnection.show = (send, platform, accou
   _renderAPC({ platformName, accountId });
 
   // Then, wire the confirm button — done after render so the element exists in the DOM
-  // Can't use data-act here because the handler needs the send() reference
-  let _busy = false;
-  const btn = ui.getBody()?.querySelector("#apc-confirm-btn");
-  if (btn) {
-    btn.addEventListener("click", async () => {
-      // Guard against double-clicks while the request is in flight
-      if (_busy) return;
-      _busy = true;
-      try {
-        await _confirmAPC(send, platformName, accountId);
-      } finally {
-        _busy = false;
-      }
-    });
-  }
+  _wireApcBtn(send, platformName, accountId);
 
   // Finally, open the modal if it isn't already
   if (!ui.isOpen()) ui.open();
