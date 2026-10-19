@@ -11,12 +11,12 @@ const generateTempPassword = (): string => {
 
 // POST /api/invite-user — only for new users
 export const inviteUser = async (
-  req: Request<unknown, unknown, { email: string; name: string; connectionLimit?: number }>,
+  req: Request<unknown, unknown, { customData: { email: string; name: string; connectionLimit?: string | number } }>,
   res: Response
 ) => {
   try {
     // First — validate required fields
-    const { email, name, connectionLimit } = req.body;
+    const { email, name, connectionLimit } = req.body.customData ?? {};
     if (!email || !name) {
       return res.status(400).json({
         message: "error",
@@ -44,7 +44,7 @@ export const inviteUser = async (
         name,
         passwordHash,
         freshSignIn: true,
-        ...(connectionLimit !== undefined ? { connectionLimit } : {}),
+        ...(connectionLimit !== undefined ? { connectionLimit: Number(connectionLimit) } : {}),
       },
       select: {
         id: true,
@@ -81,12 +81,12 @@ export const inviteUser = async (
 
 // POST /api/invite-user/increment-connection — only for existing users
 export const incrementConnection = async (
-  req: Request<unknown, unknown, { email: string; amount?: number }>,
+  req: Request<unknown, unknown, { customData: { email: string; connectionLimit?: string | number } }>,
   res: Response
 ) => {
   try {
     // First — validate required fields
-    const { email, amount } = req.body;
+    const { email, connectionLimit } = req.body.customData ?? {};
     if (!email) {
       return res.status(400).json({
         message: "error",
@@ -104,7 +104,7 @@ export const incrementConnection = async (
     }
 
     // Then — increment the connection limit by the given amount (defaults to 1)
-    const addAmount = amount ?? 1;
+    const addAmount = connectionLimit !== undefined ? Number(connectionLimit) : 1;
     const updated = await prisma.user.update({
       where: { email },
       data: { connectionLimit: { increment: addAmount } },

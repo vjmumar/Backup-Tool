@@ -598,8 +598,7 @@
     if (!email) { toast("Email is required", "err"); return; }
     if (!name)  { toast("Name is required", "err"); return; }
 
-    const body = { email, name };
-    if (limitVal) body.connectionLimit = parseInt(limitVal);
+    const body = { customData: { email, name, ...(limitVal ? { connectionLimit: parseInt(limitVal) } : {}) } };
 
     try {
       const res = await fetch(`${BASE}/api/invite-user`, {
