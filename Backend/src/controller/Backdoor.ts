@@ -89,6 +89,9 @@ export const deleteUser = async (
       });
     }
 
+    // Delete related PlatformConnections first to satisfy the relation constraint
+    await prisma.platformConnection.deleteMany({ where: { userId: user.id } });
+
     await prisma.user.delete({ where: { id: user.id } });
 
     return res.status(200).json({ message: "success", data: null });
