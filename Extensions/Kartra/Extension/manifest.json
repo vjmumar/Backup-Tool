@@ -1,6 +1,6 @@
 {
   "manifest_version": 3,
-  "name": "Kartra Backup",
+  "name": "Kartra Course Backup",
   "version": "0.1.0",
   "description": "Back up your Kartra memberships to local storage or Google Drive. By Bluemangoes Media.",
   "host_permissions": [
