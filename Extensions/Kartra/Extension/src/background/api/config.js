@@ -1,11 +1,11 @@
 /**
- * api/config.js — shared API configuration
+ * api/config.js — API configuration (Kartra)
  *
  * BASE_URL is the single place to change the backend address.
  * apiFetch is the shared fetch wrapper used by every API module.
  * Token helpers read and write the JWT in chrome.storage.local.
  *
- * Token storage key: "authToken"
+ * Token storage key: platform-prefixed to avoid colliding with other extensions.
  * Header name:       "authorizationx"  (as required by the backend)
  */
 
@@ -14,22 +14,29 @@
 export const BASE_URL = "https://backuptoolapi.bluemangoesmedia.com";
 // export const BASE_URL = "http://localhost:3005";
 
+// ─── TOKEN KEY ────────────────────────────────────────────────────────────────
+
+// Prefix the storage key with the platform name so each extension's token
+// is isolated in chrome.storage.local and can never collide.
+// "Kartra Backup" → "kartra-backup_authToken"
+const _platform = chrome.runtime.getManifest().name.toLowerCase().replace(/\s+/g, "-");
+const _TOKEN_KEY = `${_platform}_authToken`;
+
 // ─── TOKEN HELPERS ────────────────────────────────────────────────────────────
 
 /**
  * Persists the JWT after a successful sign-in.
- * Called by the auth-sign-in message handler in background.js.
  */
 export const saveToken = (token) =>
-   chrome.storage.local.set({ authToken: token });
+   chrome.storage.local.set({ [_TOKEN_KEY]: token });
 
 /**
  * Reads the stored JWT.
  * Returns null when the user is not signed in or the token was cleared.
  */
 export const loadToken = async () => {
-   const { authToken } = await chrome.storage.local.get("authToken");
-   return authToken ?? null;
+   const result = await chrome.storage.local.get(_TOKEN_KEY);
+   return result[_TOKEN_KEY] ?? null;
 };
 
 /**
@@ -37,7 +44,7 @@ export const loadToken = async () => {
  * Called on sign-out and account deletion so subsequent authed calls fail cleanly.
  */
 export const clearToken = () =>
-   chrome.storage.local.remove("authToken");
+   chrome.storage.local.remove(_TOKEN_KEY);
 
 // ─── FETCH WRAPPER ────────────────────────────────────────────────────────────
 

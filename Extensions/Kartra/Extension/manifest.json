@@ -1,0 +1,48 @@
+{
+  "manifest_version": 3,
+  "name": "Kartra Backup",
+  "version": "0.1.0",
+  "description": "Back up your Kartra memberships to local storage or Google Drive. By Bluemangoes Media.",
+  "host_permissions": [
+    "https://app.kartra.com/*",
+    "https://*.cloudfront.net/*",
+    "https://kartrausers.s3.amazonaws.com/*"
+  ],
+  "permissions": ["storage", "identity", "downloads"],
+  "icons": {
+    "16":  "icon-transparent.png",
+    "32":  "icon-transparent.png",
+    "48":  "icon-transparent.png",
+    "128": "icon-transparent.png"
+  },
+  "action": {
+    "default_popup": "src/popup/popup.html",
+    "default_title": "Kartra Backup",
+    "default_icon": {
+      "16":  "icon-transparent.png",
+      "32":  "icon-transparent.png",
+      "48":  "icon-transparent.png",
+      "128": "icon-transparent.png"
+    }
+  },
+  "background": { "service_worker": "src/background/background.js", "type": "module" },
+  "content_scripts": [
+    {
+      "matches": ["https://app.kartra.com/portal/*", "https://app.kartra.com/members_area/*"],
+      "js": [
+        "src/content/platformChecker.js",
+        "src/content/ui.js",
+        "src/content/modals/scraper.js",
+        "src/content/modals/addPlatformConnection.js",
+        "src/content/content.js"
+      ],
+      "run_at": "document_idle",
+      "world": "MAIN"
+    },
+    {
+      "matches": ["https://app.kartra.com/portal/*", "https://app.kartra.com/members_area/*"],
+      "js": ["src/content/bridge.js"],
+      "run_at": "document_start"
+    }
+  ]
+}

@@ -1,19 +1,20 @@
 /**
  * db.js — IndexedDB helpers
- * The single place that opens and talks to the "course-backup" database.
+ * The single place that opens and talks to the platform database.
  * All other background modules import from here — nothing else opens IndexedDB.
+ *
+ * DB name is derived from the manifest name at runtime so each platform
+ * extension gets its own fully isolated IndexedDB:
+ *   "Kajabi Backup" → "kajabi-backup"
+ *   "Kartra Backup" → "kartra-backup"
  *
  * Stores:
  *   "scan"  — one course per numeric index, written during the handoff.
- *             Course objects are immutable after scrape — never mutated by the dashboard.
- *             File objects carry a stable fileId stamped by the scraper.
  *   "meta"  — a single "scan" key: { count, savedAt }
  *   "sizes" — file size cache: key = fileId → bytes (number) or null
- *             Written once per file during measuring. Cleared on fresh scrape.
- *             Download statuses are NOT stored here — they live in memory only.
  */
 
-const DB_NAME = "course-backup";
+const DB_NAME = chrome.runtime.getManifest().name.toLowerCase().replace(/\s+/g, "-");
 const DB_VERSION = 5;
 
 // First, open the database once and reuse the connection

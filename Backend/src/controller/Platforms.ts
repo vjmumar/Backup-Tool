@@ -3,19 +3,17 @@ import { Request, Response } from "express";
 const PLATFORMS = [
   {
     name: "kajabi",
-    scraperName: "kajabiCourse",
+    scraperName: "kajabi",
     urlPattern: "^https:\\/\\/app\\.kajabi\\.com\\/admin\\/sites\\/\\d+\\/courses\\/?",
     accountIdExpression: "window.CLIENT_INFO?.account_id",
   },
-  // Add new platforms here:
-  // {
-  //   name: "kartra",
-  //   scraperName: "kartraCourse",
-  //   urlPattern: "^https:\\/\\/app\\.kartra\\.com\\/...",
-  //   accountIdExpression: "window.__someGlobal?.id",
-  // },
+  {
+    name: "kartra",
+    scraperName: "kartra",
+    urlPattern: "^https:\\/\\/app\\.kartra\\.com\\/memberships\\/all-memberships",
+    accountIdExpression: "JSON.parse(sessionStorage.getItem(\"pusherAuth\")).memberId",
+  },
 ];
-
 // GET /api/platforms
 export const getPlatforms = async (req: Request, res: Response) => {
   try {

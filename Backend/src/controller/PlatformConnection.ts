@@ -31,7 +31,7 @@ export const createPlatformConnection = async (
       });
     }
 
-    // Then — fetch the user to check connectionLimit
+    // Then — fetch the user to check connectionLimit and registeredPlatform
     const user = await prisma.user.findUnique({
       where: { id: req.user?.id },
       include: { _count: { select: { platformConnections: true } } },
@@ -40,6 +40,16 @@ export const createPlatformConnection = async (
       return res.status(404).json({
         message: "error",
         data: { message: "User not found" },
+      });
+    }
+
+    // Then — enforce that the platform matches the user's registeredPlatform
+    if (platform !== user.registeredPlatform) {
+      return res.status(403).json({
+        message: "error",
+        data: {
+          message: `This account is registered for "${user.registeredPlatform}" only. Cannot add a "${platform}" connection.`,
+        },
       });
     }
 

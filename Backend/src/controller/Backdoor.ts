@@ -26,6 +26,7 @@ export const getUsers = async (req: Request, res: Response) => {
         freshSignIn: true,
         isActive: true,
         connectionLimit: true,
+        registeredPlatform: true,
         createdAt: true,
         updatedAt: true,
       },

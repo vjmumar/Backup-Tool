@@ -333,6 +333,10 @@
       <input type="email" id="invite-email" placeholder="Email address" />
       <input type="text" id="invite-name" placeholder="Full name" />
       <input type="number" id="invite-limit" placeholder="Connection limit (default 3)" min="1" />
+      <select id="invite-platform" style="padding:8px 12px;background:#0f1117;border:1px solid #2d3748;border-radius:8px;color:#e2e8f0;font-size:13px;outline:none;flex:1;min-width:140px;">
+        <option value="kajabi">Kajabi</option>
+        <option value="kartra">Kartra</option>
+      </select>
       <button class="btn-primary" onclick="inviteUser()">Send Invite</button>
     </div>
   </div>
@@ -345,6 +349,7 @@
         <tr>
           <th>Email</th>
           <th>Name</th>
+          <th>Platform</th>
           <th>Login Status</th>
           <th>Active</th>
           <th>Conn. Limit</th>
@@ -353,7 +358,7 @@
         </tr>
       </thead>
       <tbody id="users-tbody">
-        <tr><td colspan="6" style="color:#64748b">Loading…</td></tr>
+        <tr><td colspan="8" style="color:#64748b">Loading…</td></tr>
       </tbody>
     </table>
   </div>
@@ -361,50 +366,94 @@
 
 <!-- Config Modal -->
 <div id="modal-overlay" onclick="handleOverlayClick(event)">
-  <div id="config-modal">
+  <div id="config-modal" style="max-width:480px;max-height:90vh;overflow-y:auto;">
     <h2>⚙ App Config</h2>
 
+    <!-- Platform dropdown — switches Kajabi / Kartra fields only -->
     <div class="modal-field">
-      <label>Version</label>
-      <input type="text" id="cfg-version" placeholder="e.g. 1.2.0" />
+      <label>Platform</label>
+      <select id="cfg-platform" onchange="switchPlatformTab(this.value)" style="padding:8px 12px;background:#0f1117;border:1px solid #2d3748;border-radius:8px;color:#e2e8f0;font-size:13px;outline:none;width:100%;">
+        <option value="kajabi">Kajabi</option>
+        <option value="kartra">Kartra</option>
+      </select>
     </div>
 
-    <div class="modal-field">
-      <label>Download Link</label>
-      <input type="text" id="cfg-download-link" placeholder="https://..." />
-    </div>
-
-    <div class="modal-field">
-      <label>Setup Link</label>
-      <input type="text" id="cfg-setup-link" placeholder="https://..." />
-    </div>
-
-    <div class="modal-field">
-      <label>Purchase Link</label>
-      <input type="text" id="cfg-purchase-link" placeholder="https://..." />
-    </div>
-
-    <div class="modal-field">
-      <label>Google Drive Client ID</label>
-      <input type="text" id="cfg-gdrive-id" placeholder="Client ID" />
-    </div>
-
-    <div class="modal-field">
-      <label>Google Drive Client Secret</label>
-      <input type="text" id="cfg-gdrive-secret" placeholder="Client Secret" />
-    </div>
-
-    <div class="modal-field">
-      <div class="modal-maint-row">
-        <span>Maintenance Mode</span>
-        <div style="display:flex;align-items:center;gap:10px">
-          <span id="modal-maint-badge" class="badge off">OFF</span>
-          <label class="switch">
-            <input type="checkbox" id="modal-maint-checkbox" />
-            <span class="slider"></span>
-          </label>
+    <!-- Kajabi fields -->
+    <div id="cfg-tab-kajabi">
+      <div class="modal-field">
+        <label>Version</label>
+        <input type="text" id="cfg-kajabi-version" placeholder="e.g. 1.2.0" />
+      </div>
+      <div class="modal-field">
+        <label>Download Link</label>
+        <input type="text" id="cfg-kajabi-download" placeholder="https://..." />
+      </div>
+      <div class="modal-field">
+        <label>Setup Link</label>
+        <input type="text" id="cfg-kajabi-setup" placeholder="https://..." />
+      </div>
+      <div class="modal-field">
+        <label>Purchase Link</label>
+        <input type="text" id="cfg-kajabi-purchase" placeholder="https://..." />
+      </div>
+      <div class="modal-field">
+        <div class="modal-maint-row">
+          <span>Maintenance Mode</span>
+          <div style="display:flex;align-items:center;gap:10px">
+            <span id="modal-kajabi-maint-badge" class="badge off">OFF</span>
+            <label class="switch">
+              <input type="checkbox" id="modal-kajabi-maint-checkbox" />
+              <span class="slider"></span>
+            </label>
+          </div>
         </div>
       </div>
+    </div>
+
+    <!-- Kartra fields -->
+    <div id="cfg-tab-kartra" style="display:none;">
+      <div class="modal-field">
+        <label>Version</label>
+        <input type="text" id="cfg-kartra-version" placeholder="e.g. 1.2.0" />
+      </div>
+      <div class="modal-field">
+        <label>Download Link</label>
+        <input type="text" id="cfg-kartra-download" placeholder="https://..." />
+      </div>
+      <div class="modal-field">
+        <label>Setup Link</label>
+        <input type="text" id="cfg-kartra-setup" placeholder="https://..." />
+      </div>
+      <div class="modal-field">
+        <label>Purchase Link</label>
+        <input type="text" id="cfg-kartra-purchase" placeholder="https://..." />
+      </div>
+      <div class="modal-field">
+        <div class="modal-maint-row">
+          <span>Maintenance Mode</span>
+          <div style="display:flex;align-items:center;gap:10px">
+            <span id="modal-kartra-maint-badge" class="badge off">OFF</span>
+            <label class="switch">
+              <input type="checkbox" id="modal-kartra-maint-checkbox" />
+              <span class="slider"></span>
+            </label>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Divider -->
+    <div style="border-top:1px solid #2d3748;margin:4px 0;"></div>
+
+    <!-- Google Drive — always visible -->
+    <div style="font-size:12px;font-weight:700;color:#94a3b8;text-transform:uppercase;letter-spacing:.06em;margin-bottom:4px;">Google Drive</div>
+    <div class="modal-field">
+      <label>Client ID</label>
+      <input type="text" id="cfg-gdrive-id" placeholder="Client ID" />
+    </div>
+    <div class="modal-field">
+      <label>Client Secret</label>
+      <input type="text" id="cfg-gdrive-secret" placeholder="Client Secret" />
     </div>
 
     <div class="modal-footer">
@@ -466,36 +515,51 @@
 
   // ── Config Modal ───────────────────────────────────────────────────────────
 
+  function switchPlatformTab(platform) {
+    ["kajabi", "kartra"].forEach(p => {
+      document.getElementById(`cfg-tab-${p}`).style.display = p === platform ? "" : "none";
+    });
+  }
+
   async function openConfigModal() {
-    // Load current config and pre-fill the modal
+    // Load current config and pre-fill all fields
     try {
       const res = await fetch(`${BASE}/api/config`);
       const json = await res.json();
       const d = json.data ?? {};
 
-      document.getElementById("cfg-version").value        = d.version ?? "";
-      document.getElementById("cfg-download-link").value  = d.downloadLink ?? "";
-      document.getElementById("cfg-setup-link").value     = d.setupLink ?? "";
-      document.getElementById("cfg-purchase-link").value  = d.purchaseLink ?? "";
-      document.getElementById("cfg-gdrive-id").value      = d.googleDrive?.clientId ?? "";
-      document.getElementById("cfg-gdrive-secret").value  = d.googleDrive?.clientSecret ?? "";
+      document.getElementById("cfg-kajabi-version").value  = d.kajabi?.version ?? "";
+      document.getElementById("cfg-kajabi-download").value = d.kajabi?.downloadLink ?? "";
+      document.getElementById("cfg-kajabi-setup").value    = d.kajabi?.setupLink ?? "";
+      document.getElementById("cfg-kajabi-purchase").value = d.kajabi?.purchaseLink ?? "";
+      const kajabiMaint = d.kajabi?.isMaintenance ?? false;
+      document.getElementById("modal-kajabi-maint-checkbox").checked = kajabiMaint;
+      setMaintenanceBadge("modal-kajabi-maint-badge", kajabiMaint);
+      document.getElementById("modal-kajabi-maint-checkbox").onchange = (e) => setMaintenanceBadge("modal-kajabi-maint-badge", e.target.checked);
 
-      const maint = d.isMaintenance ?? false;
-      document.getElementById("modal-maint-checkbox").checked = maint;
-      setModalMaintenanceBadge(maint);
+      document.getElementById("cfg-kartra-version").value  = d.kartra?.version ?? "";
+      document.getElementById("cfg-kartra-download").value = d.kartra?.downloadLink ?? "";
+      document.getElementById("cfg-kartra-setup").value    = d.kartra?.setupLink ?? "";
+      document.getElementById("cfg-kartra-purchase").value = d.kartra?.purchaseLink ?? "";
+      const kartraMaint = d.kartra?.isMaintenance ?? false;
+      document.getElementById("modal-kartra-maint-checkbox").checked = kartraMaint;
+      setMaintenanceBadge("modal-kartra-maint-badge", kartraMaint);
+      document.getElementById("modal-kartra-maint-checkbox").onchange = (e) => setMaintenanceBadge("modal-kartra-maint-badge", e.target.checked);
 
-      document.getElementById("modal-maint-checkbox").onchange = (e) => {
-        setModalMaintenanceBadge(e.target.checked);
-      };
+      document.getElementById("cfg-gdrive-id").value     = d.googleDrive?.clientId ?? "";
+      document.getElementById("cfg-gdrive-secret").value = d.googleDrive?.clientSecret ?? "";
     } catch {
       toast("Failed to load current config", "err");
     }
 
+    // Reset to Kajabi tab
+    document.getElementById("cfg-platform").value = "kajabi";
+    switchPlatformTab("kajabi");
     document.getElementById("modal-overlay").classList.add("open");
   }
 
-  function setModalMaintenanceBadge(value) {
-    const badge = document.getElementById("modal-maint-badge");
+  function setMaintenanceBadge(id, value) {
+    const badge = document.getElementById(id);
     badge.textContent = value ? "ON" : "OFF";
     badge.className = `badge ${value ? "on" : "off"}`;
   }
@@ -509,21 +573,42 @@
   }
 
   async function saveConfig() {
-    const version                 = document.getElementById("cfg-version").value.trim();
-    const downloadLink            = document.getElementById("cfg-download-link").value.trim();
-    const setupLink               = document.getElementById("cfg-setup-link").value.trim();
-    const purchaseLink            = document.getElementById("cfg-purchase-link").value.trim();
-    const googleDriveClientId     = document.getElementById("cfg-gdrive-id").value.trim();
-    const googleDriveClientSecret = document.getElementById("cfg-gdrive-secret").value.trim();
-    const isMaintenance           = document.getElementById("modal-maint-checkbox").checked;
+    const platform = document.getElementById("cfg-platform").value;
+    const body = {};
 
-    const body = { isMaintenance };
-    if (version)                  body.version = version;
-    if (downloadLink)             body.downloadLink = downloadLink;
-    if (setupLink)                body.setupLink = setupLink;
-    if (purchaseLink)             body.purchaseLink = purchaseLink;
-    if (googleDriveClientId)      body.googleDriveClientId = googleDriveClientId;
-    if (googleDriveClientSecret)  body.googleDriveClientSecret = googleDriveClientSecret;
+    // Platform-specific fields (active tab only)
+    if (platform === "kajabi") {
+      const version  = document.getElementById("cfg-kajabi-version").value.trim();
+      const download = document.getElementById("cfg-kajabi-download").value.trim();
+      const setup    = document.getElementById("cfg-kajabi-setup").value.trim();
+      const purchase = document.getElementById("cfg-kajabi-purchase").value.trim();
+      body.kajabiIsMaintenance = document.getElementById("modal-kajabi-maint-checkbox").checked;
+      if (version)  body.kajabiVersion = version;
+      if (download) body.kajabiDownloadLink = download;
+      if (setup)    body.kajabiSetupLink = setup;
+      if (purchase) body.kajabiPurchaseLink = purchase;
+    } else if (platform === "kartra") {
+      const version  = document.getElementById("cfg-kartra-version").value.trim();
+      const download = document.getElementById("cfg-kartra-download").value.trim();
+      const setup    = document.getElementById("cfg-kartra-setup").value.trim();
+      const purchase = document.getElementById("cfg-kartra-purchase").value.trim();
+      body.kartraIsMaintenance = document.getElementById("modal-kartra-maint-checkbox").checked;
+      if (version)  body.kartraVersion = version;
+      if (download) body.kartraDownloadLink = download;
+      if (setup)    body.kartraSetupLink = setup;
+      if (purchase) body.kartraPurchaseLink = purchase;
+    }
+
+    // Google Drive — always included if filled
+    const gdriveId     = document.getElementById("cfg-gdrive-id").value.trim();
+    const gdriveSecret = document.getElementById("cfg-gdrive-secret").value.trim();
+    if (gdriveId)     body.googleDriveClientId = gdriveId;
+    if (gdriveSecret) body.googleDriveClientSecret = gdriveSecret;
+
+    if (Object.keys(body).length === 0) {
+      toast("No changes to save", "err");
+      return;
+    }
 
     try {
       const res = await fetch(`${BASE}/api/config`, {
@@ -559,13 +644,18 @@
   function renderUsers(users) {
     const tbody = document.getElementById("users-tbody");
     if (!users || users.length === 0) {
-      tbody.innerHTML = `<tr><td colspan="6" style="color:#64748b">No users found.</td></tr>`;
+      tbody.innerHTML = `<tr><td colspan="8" style="color:#64748b">No users found.</td></tr>`;
       return;
     }
     tbody.innerHTML = users.map(u => `
       <tr>
         <td>${u.email}</td>
         <td>${u.name ?? "—"}</td>
+        <td>
+          <span class="tag" style="background:${u.registeredPlatform === 'kartra' ? '#065f46' : '#1e3a5f'};color:${u.registeredPlatform === 'kartra' ? '#6ee7b7' : '#93c5fd'}">
+            ${u.registeredPlatform ?? "kajabi"}
+          </span>
+        </td>
         <td>
           <span class="tag ${u.freshSignIn ? "fresh" : "active"}">
             ${u.freshSignIn ? "Fresh login" : "Active"}
@@ -595,10 +685,11 @@
     const email = document.getElementById("invite-email").value.trim();
     const name = document.getElementById("invite-name").value.trim();
     const limitVal = document.getElementById("invite-limit").value;
+    const platform = document.getElementById("invite-platform").value;
     if (!email) { toast("Email is required", "err"); return; }
     if (!name)  { toast("Name is required", "err"); return; }
 
-    const body = { customData: { email, name, ...(limitVal ? { connectionLimit: parseInt(limitVal) } : {}) } };
+    const body = { customData: { email, name, platform, ...(limitVal ? { connectionLimit: parseInt(limitVal) } : {}) } };
 
     try {
       const res = await fetch(`${BASE}/api/invite-user`, {
@@ -608,10 +699,11 @@
       });
       const json = await res.json();
       if (json.message === "success") {
-        toast(`Invited ${email}`);
+        toast(`Invited ${email} (${platform})`);
         document.getElementById("invite-email").value = "";
         document.getElementById("invite-name").value = "";
         document.getElementById("invite-limit").value = "";
+        document.getElementById("invite-platform").value = "kajabi";
         loadUsers();
       } else {
         toast(json.data?.message || "Invite failed", "err");

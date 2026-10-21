@@ -15,6 +15,7 @@ model User {
   freshSignIn         Boolean              @default(true)
   isActive            Boolean              @default(true)
   connectionLimit     Int                  @default(3)
+  registeredPlatform  String               @default("kajabi") // "kajabi" | "kartra"
   createdAt           DateTime             @default(now())
   updatedAt           DateTime             @updatedAt
 
@@ -24,13 +25,23 @@ model User {
 // Singleton config document — only one record should ever exist
 model AppConfig {
   id                      String   @id @default(auto()) @map("_id") @db.ObjectId
-  version                 String   // e.g. "1.2.0" — clients compare their manifest version against this
-  downloadLink            String   // download link for the current version
-  setupLink               String   // link to the setup/installation guide
-  purchaseLink            String   // link to purchase/subscribe
-  isMaintenance           Boolean  @default(false)
+  kajabiIsMaintenance     Boolean  @default(false)
+  kartraIsMaintenance     Boolean  @default(false)
   googleDriveClientId     String
   googleDriveClientSecret String
+
+  // Kajabi-specific fields
+  kajabiVersion           String   @default("")
+  kajabiDownloadLink      String   @default("")
+  kajabiSetupLink         String   @default("")
+  kajabiPurchaseLink      String   @default("")
+
+  // Kartra-specific fields
+  kartraVersion           String   @default("")
+  kartraDownloadLink      String   @default("")
+  kartraSetupLink         String   @default("")
+  kartraPurchaseLink      String   @default("")
+
   createdAt               DateTime @default(now())
   updatedAt               DateTime @updatedAt
 }

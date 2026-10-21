@@ -9,18 +9,29 @@ const generateTempPassword = (): string => {
   return crypto.randomBytes(6).toString("base64url").slice(0, 8);
 };
 
+const VALID_PLATFORMS = ["kajabi", "kartra"] as const;
+type Platform = (typeof VALID_PLATFORMS)[number];
+
 // POST /api/invite-user — only for new users
 export const inviteUser = async (
-  req: Request<unknown, unknown, { customData: { email: string; name: string; connectionLimit?: string | number } }>,
+  req: Request<unknown, unknown, { customData: { email: string; name: string; platform?: string; connectionLimit?: string | number } }>,
   res: Response
 ) => {
   try {
     // First — validate required fields
-    const { email, name, connectionLimit } = req.body.customData ?? {};
+    const { email, name, platform, connectionLimit } = req.body.customData ?? {};
     if (!email || !name) {
       return res.status(400).json({
         message: "error",
         data: { message: "Email and name are required" },
+      });
+    }
+
+    // Then — validate platform if provided
+    if (platform !== undefined && !VALID_PLATFORMS.includes(platform as Platform)) {
+      return res.status(400).json({
+        message: "error",
+        data: { message: `Invalid platform. Must be one of: ${VALID_PLATFORMS.join(", ")}` },
       });
     }
 
@@ -37,7 +48,7 @@ export const inviteUser = async (
     const tempPassword = generateTempPassword();
     const passwordHash = await hashPassword(tempPassword);
 
-    // Then — create the user, applying connectionLimit if provided (defaults to 3)
+    // Then — create the user, applying connectionLimit and registeredPlatform if provided
     const user = await prisma.user.create({
       data: {
         email,
@@ -45,6 +56,7 @@ export const inviteUser = async (
         passwordHash,
         freshSignIn: true,
         ...(connectionLimit !== undefined ? { connectionLimit: Number(connectionLimit) } : {}),
+        ...(platform !== undefined ? { registeredPlatform: platform as Platform } : {}),
       },
       select: {
         id: true,
@@ -52,12 +64,25 @@ export const inviteUser = async (
         name: true,
         freshSignIn: true,
         connectionLimit: true,
+        registeredPlatform: true,
         createdAt: true,
       },
     });
 
     // Then — send the invite email with the temporary password
-    const appConfig = await prisma.appConfig.findFirst({ select: { downloadLink: true, version: true, setupLink: true } });
+    // Pick the right platform's links from AppConfig
+    const appConfig = await prisma.appConfig.findFirst({
+      select: {
+        kajabiVersion: true, kajabiDownloadLink: true, kajabiSetupLink: true,
+        kartraVersion: true, kartraDownloadLink: true, kartraSetupLink: true,
+      },
+    });
+
+    const resolvedPlatform = (platform ?? "kajabi") as Platform;
+    const version = resolvedPlatform === "kartra" ? appConfig?.kartraVersion : appConfig?.kajabiVersion;
+    const downloadUrl = resolvedPlatform === "kartra" ? appConfig?.kartraDownloadLink : appConfig?.kajabiDownloadLink;
+    const setupUrl = resolvedPlatform === "kartra" ? appConfig?.kartraSetupLink : appConfig?.kajabiSetupLink;
+
     await postmarkClient.sendEmailWithTemplate({
        From: "backuptool@bluemangoesmedia.com",
        To: email,
@@ -66,9 +91,9 @@ export const inviteUser = async (
           email,
           name: name,
           password: tempPassword,
-          version: appConfig?.version,
-          download_url: appConfig?.downloadLink,
-          setup_url: appConfig?.setupLink
+          version,
+          download_url: downloadUrl,
+          setup_url: setupUrl,
        },
     });
 
@@ -81,12 +106,12 @@ export const inviteUser = async (
 
 // POST /api/invite-user/increment-connection — only for existing users
 export const incrementConnection = async (
-  req: Request<unknown, unknown, { customData: { email: string; connectionLimit?: string | number } }>,
+  req: Request<unknown, unknown, { customData: { email: string; platform?: string; connectionLimit?: string | number } }>,
   res: Response
 ) => {
   try {
     // First — validate required fields
-    const { email, connectionLimit } = req.body.customData ?? {};
+    const { email, platform, connectionLimit } = req.body.customData ?? {};
     if (!email) {
       return res.status(400).json({
         message: "error",
@@ -100,6 +125,14 @@ export const incrementConnection = async (
       return res.status(404).json({
         message: "error",
         data: { message: "User not found. Use the invite endpoint to create a new user." },
+      });
+    }
+
+    // Then — enforce platform match if provided
+    if (platform !== undefined && existing.registeredPlatform !== platform) {
+      return res.status(403).json({
+        message: "error",
+        data: { message: `This account is registered for "${existing.registeredPlatform}", not "${platform}".` },
       });
     }
 

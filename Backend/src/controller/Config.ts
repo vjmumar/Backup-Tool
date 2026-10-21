@@ -16,11 +16,20 @@ export const getConfig = async (req: Request, res: Response) => {
           clientId: config?.googleDriveClientId ?? null,
           clientSecret: config?.googleDriveClientSecret ?? null,
         },
-        version: config?.version ?? null,
-        downloadLink: config?.downloadLink ?? null,
-        setupLink: config?.setupLink ?? null,
-        purchaseLink: config?.purchaseLink ?? null,
-        isMaintenance: config?.isMaintenance ?? false,
+        kajabi: {
+          version: config?.kajabiVersion ?? null,
+          downloadLink: config?.kajabiDownloadLink ?? null,
+          setupLink: config?.kajabiSetupLink ?? null,
+          purchaseLink: config?.kajabiPurchaseLink ?? null,
+          isMaintenance: config?.kajabiIsMaintenance ?? false,
+        },
+        kartra: {
+          version: config?.kartraVersion ?? null,
+          downloadLink: config?.kartraDownloadLink ?? null,
+          setupLink: config?.kartraSetupLink ?? null,
+          purchaseLink: config?.kartraPurchaseLink ?? null,
+          isMaintenance: config?.kartraIsMaintenance ?? false,
+        },
       },
     });
   } catch (err) {
@@ -34,29 +43,54 @@ export const updateConfig = async (
     unknown,
     unknown,
     {
-      version?: string;
-      downloadLink?: string;
-      setupLink?: string;
-      purchaseLink?: string;
-      isMaintenance?: boolean;
       googleDriveClientId?: string;
       googleDriveClientSecret?: string;
+      // Kajabi
+      kajabiVersion?: string;
+      kajabiDownloadLink?: string;
+      kajabiSetupLink?: string;
+      kajabiPurchaseLink?: string;
+      kajabiIsMaintenance?: boolean;
+      // Kartra
+      kartraVersion?: string;
+      kartraDownloadLink?: string;
+      kartraSetupLink?: string;
+      kartraPurchaseLink?: string;
+      kartraIsMaintenance?: boolean;
     }
   >,
   res: Response
 ) => {
   try {
-    const { version, downloadLink, setupLink, purchaseLink, isMaintenance, googleDriveClientId, googleDriveClientSecret } = req.body;
+    const {
+      googleDriveClientId,
+      googleDriveClientSecret,
+      kajabiVersion,
+      kajabiDownloadLink,
+      kajabiSetupLink,
+      kajabiPurchaseLink,
+      kajabiIsMaintenance,
+      kartraVersion,
+      kartraDownloadLink,
+      kartraSetupLink,
+      kartraPurchaseLink,
+      kartraIsMaintenance,
+    } = req.body;
 
     // First — validate at least one field is provided
     if (
-      version === undefined &&
-      downloadLink === undefined &&
-      setupLink === undefined &&
-      purchaseLink === undefined &&
-      isMaintenance === undefined &&
       googleDriveClientId === undefined &&
-      googleDriveClientSecret === undefined
+      googleDriveClientSecret === undefined &&
+      kajabiVersion === undefined &&
+      kajabiDownloadLink === undefined &&
+      kajabiSetupLink === undefined &&
+      kajabiPurchaseLink === undefined &&
+      kajabiIsMaintenance === undefined &&
+      kartraVersion === undefined &&
+      kartraDownloadLink === undefined &&
+      kartraSetupLink === undefined &&
+      kartraPurchaseLink === undefined &&
+      kartraIsMaintenance === undefined
     ) {
       return res.status(400).json({
         message: "error",
@@ -69,35 +103,45 @@ export const updateConfig = async (
 
     if (!existing) {
       // No record yet — core fields required for first-time creation
-      if (!version || !downloadLink || !googleDriveClientId || !googleDriveClientSecret) {
+      if (!googleDriveClientId || !googleDriveClientSecret) {
         return res.status(400).json({
           message: "error",
-          data: { message: "version, downloadLink, googleDriveClientId, and googleDriveClientSecret are required when creating the config for the first time" },
+          data: { message: "googleDriveClientId and googleDriveClientSecret are required when creating the config for the first time" },
         });
       }
 
       config = await prisma.appConfig.create({
         data: {
-          version,
-          downloadLink,
-          setupLink: setupLink ?? "",
-          purchaseLink: purchaseLink ?? "",
-          isMaintenance: isMaintenance ?? false,
           googleDriveClientId,
           googleDriveClientSecret,
+          kajabiVersion: kajabiVersion ?? "",
+          kajabiDownloadLink: kajabiDownloadLink ?? "",
+          kajabiSetupLink: kajabiSetupLink ?? "",
+          kajabiPurchaseLink: kajabiPurchaseLink ?? "",
+          kajabiIsMaintenance: kajabiIsMaintenance ?? false,
+          kartraVersion: kartraVersion ?? "",
+          kartraDownloadLink: kartraDownloadLink ?? "",
+          kartraSetupLink: kartraSetupLink ?? "",
+          kartraPurchaseLink: kartraPurchaseLink ?? "",
+          kartraIsMaintenance: kartraIsMaintenance ?? false,
         },
       });
     } else {
       config = await prisma.appConfig.update({
         where: { id: existing.id },
         data: {
-          ...(version !== undefined ? { version } : {}),
-          ...(downloadLink !== undefined ? { downloadLink } : {}),
-          ...(setupLink !== undefined ? { setupLink } : {}),
-          ...(purchaseLink !== undefined ? { purchaseLink } : {}),
-          ...(isMaintenance !== undefined ? { isMaintenance } : {}),
           ...(googleDriveClientId !== undefined ? { googleDriveClientId } : {}),
           ...(googleDriveClientSecret !== undefined ? { googleDriveClientSecret } : {}),
+          ...(kajabiVersion !== undefined ? { kajabiVersion } : {}),
+          ...(kajabiDownloadLink !== undefined ? { kajabiDownloadLink } : {}),
+          ...(kajabiSetupLink !== undefined ? { kajabiSetupLink } : {}),
+          ...(kajabiPurchaseLink !== undefined ? { kajabiPurchaseLink } : {}),
+          ...(kajabiIsMaintenance !== undefined ? { kajabiIsMaintenance } : {}),
+          ...(kartraVersion !== undefined ? { kartraVersion } : {}),
+          ...(kartraDownloadLink !== undefined ? { kartraDownloadLink } : {}),
+          ...(kartraSetupLink !== undefined ? { kartraSetupLink } : {}),
+          ...(kartraPurchaseLink !== undefined ? { kartraPurchaseLink } : {}),
+          ...(kartraIsMaintenance !== undefined ? { kartraIsMaintenance } : {}),
         },
       });
     }

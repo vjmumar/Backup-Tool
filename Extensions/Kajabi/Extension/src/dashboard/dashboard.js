@@ -15,10 +15,11 @@
  *                     Cleared on new scrape or when a new backup run starts.
  */
 
-const LS_KEY = "courseBackup_fileStatus";
-const LS_DEST_KEY = "courseBackup_destination";
-const LS_ROOT_KEY = "courseBackup_rootFolder";
-const LS_SELECTED_KEY = "courseBackup_selected";
+const _PLATFORM = chrome.runtime.getManifest().name.toLowerCase().replace(/\s+/g, "-");
+const LS_KEY = `${_PLATFORM}_fileStatus`;
+const LS_DEST_KEY = `${_PLATFORM}_destination`;
+const LS_ROOT_KEY = `${_PLATFORM}_rootFolder`;
+const LS_SELECTED_KEY = `${_PLATFORM}_selected`;
 
 class CourseDashboard {
    constructor() {
@@ -60,12 +61,14 @@ class CourseDashboard {
    // ─── DATABASE ────────────────────────────────────────────────────────────────
 
    /**
-    * Opens the shared IndexedDB database.
-    * Version 5: scan + meta + sizes stores. "backup" store deleted on upgrade.
+    * Opens the platform-specific IndexedDB database.
+    * DB name derived from manifest so it matches db.js and never conflicts
+    * with other platform extensions. "Kajabi Backup" → "kajabi-backup"
     */
    _openDb = () =>
    (this._dbPromise ||= new Promise((resolve, reject) => {
-      const request = indexedDB.open("course-backup", 5);
+      const dbName = chrome.runtime.getManifest().name.toLowerCase().replace(/\s+/g, "-");
+      const request = indexedDB.open(dbName, 5);
       request.onupgradeneeded = (e) => {
          const db = e.target.result;
          if (!db.objectStoreNames.contains("scan")) db.createObjectStore("scan");

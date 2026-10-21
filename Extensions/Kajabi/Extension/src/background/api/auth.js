@@ -12,36 +12,22 @@
 import { BASE_URL, apiFetch } from "./config.js";
 
 const AUTH = `${BASE_URL}/api/auth`;
+const PLATFORM = "kajabi";
 
 // ─── FORGOT PASSWORD ──────────────────────────────────────────────────────────
 
-/**
- * Sends a password reset email to the given address.
- * Public endpoint — no token required.
- *
- * @param {string} email
- * @returns {{ ok: boolean, error?: string }}
- */
 export const forgotPassword = ({ email }) =>
    apiFetch(`${AUTH}/forgot-password`, {
       method: "POST",
-      body: { email },
+      body: { email, platform: PLATFORM },
    });
 
 // ─── SIGN IN ──────────────────────────────────────────────────────────────────
 
-/**
- * Signs in with email and password.
- * On success the background handler saves the returned token to storage.
- *
- * @param {string} email
- * @param {string} password
- * @returns {{ ok: boolean, token?: string, freshSignIn?: boolean, error?: string }}
- */
 export const signIn = ({ email, password }) =>
    apiFetch(`${AUTH}/sign-in`, {
       method: "POST",
-      body: { email, password },
+      body: { email, password, platform: PLATFORM },
    });
 
 // ─── CHANGE PASSWORD ──────────────────────────────────────────────────────────

@@ -13,16 +13,16 @@ const generateTempPassword = (): string => {
 
 // POST /api/auth/sign-in
 export const signIn = async (
-  req: Request<unknown, unknown, { email: string; password: string }>,
+  req: Request<unknown, unknown, { email: string; password: string; platform: string }>,
   res: Response
 ) => {
   try {
     // First — validate required fields
-    const { email, password } = req.body;
-    if (!email || !password) {
+    const { email, password, platform } = req.body;
+    if (!email || !password || !platform) {
       return res.status(400).json({
         message: "error",
-        data: { message: "Email and password are required" },
+        data: { message: "Email, password, and platform are required" },
       });
     }
 
@@ -52,6 +52,14 @@ export const signIn = async (
       });
     }
 
+    // Then — enforce platform match
+    if (user.registeredPlatform !== platform) {
+      return res.status(403).json({
+        message: "error",
+        data: { message: `This account is registered for "${user.registeredPlatform}". Please use the correct app to sign in.` },
+      });
+    }
+
     // Finally — sign a JWT and respond, including freshSignIn so the client can redirect
     const token = jwt.sign(
       { id: user.id, email: user.email },
@@ -67,6 +75,7 @@ export const signIn = async (
           id: user.id,
           email: user.email,
           freshSignIn: user.freshSignIn,
+          registeredPlatform: user.registeredPlatform,
           createdAt: user.createdAt,
         },
       },
@@ -88,6 +97,7 @@ export const getMe = async (req: Request, res: Response) => {
         freshSignIn: true,
         isActive: true,
         connectionLimit: true,
+        registeredPlatform: true,
         createdAt: true,
         updatedAt: true,
       },
@@ -233,16 +243,16 @@ export const deleteMe = async (req: Request, res: Response) => {
 
 // POST /api/auth/forgot-password
 export const forgotPassword = async (
-  req: Request<unknown, unknown, { email: string }>,
+  req: Request<unknown, unknown, { email: string; platform: string }>,
   res: Response
 ) => {
   try {
     // First — validate required fields
-    const { email } = req.body;
-    if (!email) {
+    const { email, platform } = req.body;
+    if (!email || !platform) {
       return res.status(400).json({
         message: "error",
-        data: { message: "Email is required" },
+        data: { message: "Email and platform are required" },
       });
     }
 
@@ -252,6 +262,14 @@ export const forgotPassword = async (
       return res.status(404).json({
         message: "error",
         data: { message: "No user found with that email" },
+      });
+    }
+
+    // Then — enforce platform match
+    if (user.registeredPlatform !== platform) {
+      return res.status(403).json({
+        message: "error",
+        data: { message: `This account is registered for "${user.registeredPlatform}". Please use the correct app.` },
       });
     }
 
