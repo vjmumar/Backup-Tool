@@ -51,8 +51,8 @@ class BackupOrchestrator {
       // Then, the destination writer — swapped out per destination
       this.writer = writer;
 
-      // Then, the root folder name (user-editable, defaults to "Course Backup")
-      this.rootFolder = (rootFolder || "Course Backup").trim() || "Course Backup";
+      // Then, the root folder name (user-editable, defaults to "Kajabi Backup")
+      this.rootFolder = (rootFolder || "Kajabi Backup").trim() || "Kajabi Backup";
 
       // Then, UI callbacks
       this.onProgress = onProgress || (() => { });
@@ -252,7 +252,7 @@ class BackupOrchestrator {
          this.onDone({ saved: this.saved, failed: this.failed, cancelled: this.cancelled });
 
       } catch (error) {
-         console.error("[Course Backup] backup error", error);
+         console.error("[Kajabi Backup] backup error", error);
          this.onError(error);
       }
    };

@@ -100,7 +100,7 @@ class LocalBackup {
          });
 
       } catch (error) {
-         console.error("[Course Backup] local backup error", error);
+         console.error("[Kajabi Backup] local backup error", error);
          this.onError(error);
       }
    };

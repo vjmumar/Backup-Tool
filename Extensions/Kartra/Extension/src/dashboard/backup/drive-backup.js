@@ -105,7 +105,7 @@ class DriveBackup {
          });
 
       } catch (error) {
-         console.error("[Course Backup] Drive backup error", error);
+         console.error("[Kartra Backup] Drive backup error", error);
          this.onError(error);
       }
    };

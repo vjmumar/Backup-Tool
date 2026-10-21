@@ -16,9 +16,7 @@
  * This file reads data.kajabi — the Kartra extension reads data.kartra.
  */
 
-import { BASE_URL } from "./config.js";
-
-const PLATFORM = "kajabi";
+import { BASE_URL, PLATFORM } from "./config.js";
 
 // ─── GET APP CONFIG ───────────────────────────────────────────────────────────
 

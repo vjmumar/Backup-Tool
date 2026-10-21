@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
-  "name": "Course Backup",
+  "name": "Kajabi Backup",
   "version": "0.1.0",
-  "description": "Back up your online courses to local storage or Google Drive. By Bluemangoes Media.",
+  "description": "Back up your Kajabi courses to local storage or Google Drive. By Bluemangoes Media.",
   "host_permissions": [
     "https://*.kajabi-cdn.com/*",
     "https://*.amazonaws.com/*",
@@ -17,7 +17,7 @@
   },
   "action": {
     "default_popup": "src/popup/popup.html",
-    "default_title": "Course Backup",
+    "default_title": "Kajabi Backup",
     "default_icon": {
       "16":  "icon-transparent.png",
       "32":  "icon-transparent.png",

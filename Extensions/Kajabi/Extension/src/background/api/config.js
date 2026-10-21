@@ -1,7 +1,8 @@
 /**
- * api/config.js — shared API configuration
+ * api/config.js — API configuration (Kajabi)
  *
  * BASE_URL is the single place to change the backend address.
+ * PLATFORM is the internal identifier sent to the backend ("kajabi").
  * apiFetch is the shared fetch wrapper used by every API module.
  * Token helpers read and write the JWT in chrome.storage.local.
  *
@@ -13,6 +14,12 @@
 
 // export const BASE_URL = "https://backuptoolapi.bluemangoesmedia.com";
 export const BASE_URL = "http://localhost:3005";
+
+// ─── PLATFORM ─────────────────────────────────────────────────────────────────
+
+// Internal platform identifier sent to the backend in auth and config calls.
+// Imported by auth.js and appConfig.js so the platform name lives in one place.
+export const PLATFORM = "kajabi";
 
 // ─── TOKEN KEY ────────────────────────────────────────────────────────────────
 

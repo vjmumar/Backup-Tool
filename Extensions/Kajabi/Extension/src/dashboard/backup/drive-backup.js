@@ -105,7 +105,7 @@ class DriveBackup {
          });
 
       } catch (error) {
-         console.error("[Course Backup] Drive backup error", error);
+         console.error("[Kajabi Backup] Drive backup error", error);
          this.onError(error);
       }
    };

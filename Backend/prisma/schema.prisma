@@ -25,8 +25,6 @@ model User {
 // Singleton config document — only one record should ever exist
 model AppConfig {
   id                      String   @id @default(auto()) @map("_id") @db.ObjectId
-  kajabiIsMaintenance     Boolean  @default(false)
-  kartraIsMaintenance     Boolean  @default(false)
   googleDriveClientId     String
   googleDriveClientSecret String
 
@@ -35,12 +33,14 @@ model AppConfig {
   kajabiDownloadLink      String   @default("")
   kajabiSetupLink         String   @default("")
   kajabiPurchaseLink      String   @default("")
+  kajabiIsMaintenance     Boolean  @default(false)
 
   // Kartra-specific fields
   kartraVersion           String   @default("")
   kartraDownloadLink      String   @default("")
   kartraSetupLink         String   @default("")
   kartraPurchaseLink      String   @default("")
+  kartraIsMaintenance     Boolean  @default(false)
 
   createdAt               DateTime @default(now())
   updatedAt               DateTime @updatedAt

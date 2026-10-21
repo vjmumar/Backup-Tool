@@ -238,7 +238,7 @@ window.__courseBackup.modals.scraper.init = (send, platform) => {
       if (ui.isOpen()) ui.showDone(saved);
 
     } catch (error) {
-      console.error("[Course Backup]", error);
+      console.error("[Kajabi Backup]", error);
       if (my === scanId && ui.isOpen()) ui.showError(error);
     } finally {
       window.removeEventListener("unhandledrejection", onReject);

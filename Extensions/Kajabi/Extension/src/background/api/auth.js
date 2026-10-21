@@ -1,5 +1,5 @@
 /**
- * api/auth.js — Auth API
+ * api/auth.js — Auth API (Kajabi)
  *
  * All functions talk to BASE_URL/api/auth.
  * Called by the auth-* message handlers in background.js.
@@ -9,10 +9,9 @@
  *   { ok: false, error: "" }   — HTTP error or network failure
  */
 
-import { BASE_URL, apiFetch } from "./config.js";
+import { BASE_URL, PLATFORM, apiFetch } from "./config.js";
 
 const AUTH = `${BASE_URL}/api/auth`;
-const PLATFORM = "kajabi";
 
 // ─── FORGOT PASSWORD ──────────────────────────────────────────────────────────
 

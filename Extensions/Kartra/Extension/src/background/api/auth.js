@@ -9,10 +9,9 @@
  *   { ok: false, error: "" }   — HTTP error or network failure
  */
 
-import { BASE_URL, apiFetch } from "./config.js";
+import { BASE_URL, PLATFORM, apiFetch } from "./config.js";
 
 const AUTH = `${BASE_URL}/api/auth`;
-const PLATFORM = "kartra";
 
 // ─── FORGOT PASSWORD ──────────────────────────────────────────────────────────
 
