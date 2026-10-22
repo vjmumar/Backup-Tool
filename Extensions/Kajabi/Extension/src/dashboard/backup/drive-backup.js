@@ -17,7 +17,7 @@
 class DriveBackup {
    constructor({ courses, selected, empties, rootFolder,
       onProgress, onDone, onError, onFileStatus, getFileStatus,
-      resumeAtPostId }) {
+      resumeAtPostId, retryPostId }) {
       this.courses = courses;
       this.selected = selected;
       this.empties = empties;
@@ -28,6 +28,7 @@ class DriveBackup {
       this.onFileStatus = onFileStatus || (() => { });
       this.getFileStatus = getFileStatus || (() => undefined);
       this.resumeAtPostId = resumeAtPostId || null;
+      this.retryPostId = retryPostId || null;
       this._run();
    }
 
@@ -102,6 +103,7 @@ class DriveBackup {
             onDone: this.onDone,
             onError: this.onError,
             resumeAtPostId: this.resumeAtPostId,
+            retryPostId: this.retryPostId,
          });
 
       } catch (error) {

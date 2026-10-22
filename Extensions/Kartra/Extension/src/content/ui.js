@@ -16,7 +16,7 @@ window.__courseBackup.ui = (() => {
 :host {
    all: initial;
    --surface: #ffffff; --bg: #f3f5f6; --ink: #16212b; --muted: #5b6a77; --line: #dde3e8;
-   --accent: #0e6b63; --accent-ink: #ffffff; --accent-soft: #dff0ed;
+   --accent: #2E88DC; --accent-ink: #ffffff; --accent-soft: #dbeeff;
    --good: #1b7a44; --good-soft: #e1f3e7; --warn: #9a5a00; --warn-soft: #fff0d6; --bad: #b3261e; --bad-soft: #fbe8e6;
    --scrim: rgba(12, 20, 28, .55); --shadow: 0 16px 48px rgba(12, 20, 28, .28);
    --font-display: "Bricolage Grotesque", system-ui, -apple-system, "Segoe UI", sans-serif;
@@ -27,7 +27,7 @@ window.__courseBackup.ui = (() => {
 @media (prefers-color-scheme: dark) {
    :host {
       --surface: #17212a; --bg: #0f161c; --ink: #e7edf2; --muted: #93a2af; --line: #2a3743;
-      --accent: #3fb5a8; --accent-ink: #06201d; --accent-soft: #16312f;
+      --accent: #2E88DC; --accent-ink: #ffffff; --accent-soft: #1a3a5c;
       --good: #5cc98a; --good-soft: #163025; --warn: #f0b255; --warn-soft: #352711; --bad: #ff8f86; --bad-soft: #3a1c1a;
       --scrim: rgba(0, 0, 0, .65); --shadow: 0 16px 48px rgba(0, 0, 0, .55);
    }

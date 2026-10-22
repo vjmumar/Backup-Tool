@@ -6,7 +6,7 @@
   "host_permissions": [
     "https://app.kartra.com/*",
     "https://*.cloudfront.net/*",
-    "https://kartrausers.s3.amazonaws.com/*"
+    "https://*.amazonaws.com/*"
   ],
   "permissions": ["storage", "identity", "downloads"],
   "icons": {
@@ -25,10 +25,11 @@
       "128": "icon-transparent.png"
     }
   },
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAuPxGSSBt5wHgXrkxHSrgmNAvVAz3M0J5pJYP6T+lJjovYEazd+f1sB+6XDygFoDsCiiBvhYe/bl7kUZfP4OlHcqtA5x56BEpelhmVJh9iLsN4kNPKkU8zTsjEBN6Nhmrbch0jAMniizeAMbPgNCz9lMQ0qkF916Y0VwykvLsSASHmidQz7E0jJ5EhaWsWJdEErFoNWFi0jogLJ/nlrLkkPa8Q33d5hEAsYFNMYudXucAluORVLqUnMA6LsZB6rA9j2HyH8ia/ee3snC8GUvLhig7ddOg7cI4XuAQ+/KtwyUJEjkFgGEXFzpVw8u8LrAaUdpLqqHi8a4W4mQ1advtnQIDAQAB",
   "background": { "service_worker": "src/background/background.js", "type": "module" },
   "content_scripts": [
     {
-      "matches": ["https://app.kartra.com/portal/*", "https://app.kartra.com/members_area/*"],
+      "matches": ["https://app.kartra.com/portal/*", "https://app.kartra.com/members_area/*", "https://app.kartra.com/memberships/all-memberships"],
       "js": [
         "src/content/platformChecker.js",
         "src/content/ui.js",
@@ -40,7 +41,7 @@
       "world": "MAIN"
     },
     {
-      "matches": ["https://app.kartra.com/portal/*", "https://app.kartra.com/members_area/*"],
+      "matches": ["https://app.kartra.com/portal/*", "https://app.kartra.com/members_area/*", "https://app.kartra.com/memberships/all-memberships"],
       "js": ["src/content/bridge.js"],
       "run_at": "document_start"
     }

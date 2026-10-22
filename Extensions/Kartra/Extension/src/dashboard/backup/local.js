@@ -1,7 +1,7 @@
 /**
  * local.js — local backup writer
  *
- * Implements the writer interface expected by BackupOrchestrator:
+ * Implements the writer interface expected by KartraOrchestrator:
  *   { write(path, url): Promise<{ ok, error? }> }
  *
  * Before starting, checks whether Chrome's "Ask where to save each file"
@@ -15,12 +15,11 @@
  */
 
 class LocalBackup {
-   constructor({ courses, selected, empties, rootFolder,
+   constructor({ memberships, selected, rootFolder,
       onProgress, onDone, onError, onFileStatus, getFileStatus,
-      resumeAtPostId }) {
-      this.courses = courses;
+      resumeAtPostId, retryPostId }) {
+      this.memberships = memberships;
       this.selected = selected;
-      this.empties = empties;
       this.rootFolder = rootFolder;
       this.onProgress = onProgress || (() => { });
       this.onDone = onDone || (() => { });
@@ -28,13 +27,14 @@ class LocalBackup {
       this.onFileStatus = onFileStatus || (() => { });
       this.getFileStatus = getFileStatus || (() => undefined);
       this.resumeAtPostId = resumeAtPostId || null;
+      this.retryPostId = retryPostId || null;
       this._run();
    }
 
    // ─── WRITER ──────────────────────────────────────────────────────────────────
 
    /**
-    * The writer object passed to BackupOrchestrator.
+    * The writer object passed to KartraOrchestrator.
     * Sends each file to the background service worker via chrome.runtime.sendMessage.
     * Retries up to 3 times on transient errors.
     */
@@ -68,7 +68,7 @@ class LocalBackup {
    // ─── RUN ─────────────────────────────────────────────────────────────────────
 
    /**
-    * Pre-flight check, then hands off to BackupOrchestrator with the local writer.
+    * Pre-flight check, then hands off to KartraOrchestrator with the local writer.
     */
    _run = async () => {
       try {
@@ -84,11 +84,10 @@ class LocalBackup {
             return this.onError(err);
          }
 
-         // Finally, run the backup using the shared orchestrator with the local writer
-         this._orchestrator = new BackupOrchestrator({
-            courses: this.courses,
+         // Finally, run the backup using the orchestrator with the local writer
+         this._orchestrator = new KartraOrchestrator({
+            memberships: this.memberships,
             selected: this.selected,
-            empties: this.empties,
             rootFolder: this.rootFolder,
             writer: this._writer,
             onFileStatus: this.onFileStatus,
@@ -97,6 +96,7 @@ class LocalBackup {
             onDone: this.onDone,
             onError: this.onError,
             resumeAtPostId: this.resumeAtPostId,
+            retryPostId: this.retryPostId,
          });
 
       } catch (error) {

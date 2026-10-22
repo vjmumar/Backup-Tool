@@ -54,9 +54,9 @@ export const signIn = async (
 
     // Then — enforce platform match
     if (user.registeredPlatform !== platform) {
-      return res.status(403).json({
+      return res.status(401).json({
         message: "error",
-        data: { message: `This account is registered for "${user.registeredPlatform}". Please use the correct app to sign in.` },
+        data: { message: "Invalid credentials" },
       });
     }
 

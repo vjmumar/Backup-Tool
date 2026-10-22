@@ -57,34 +57,58 @@ window.__courseBackup.modals.scraper.init = (send, platform) => {
 
   /**
    * Stamps stable string IDs onto every membership, category, subcategory,
-   * and post so the dashboard and orchestrator can reference them reliably.
+   * post, and file so the dashboard can key sizes and statuses globally.
    *
    *   membership.id   already a string from the API — kept as-is
    *   category._id    = "cat-<mi>-<ci>"
    *   subcategory._id = "sub-<mi>-<ci>-<si>"
-   *   post._id        = "post-<mi>-<ci>-<pi>"  (or sub-<mi>-<ci>-<si>-<pi>)
+   *   post._id        = "post-<mi>-<ci>-<pi>"  (or "post-<mi>-<ci>-<si>-<pi>")
+   *   file.fileId     = "<post._id>:f<fi>"
    *
-   * We use _id to avoid colliding with the numeric id fields from Kartra.
+   * Also normalises file sizes: download files from the scraper carry a
+   * human-readable size string (e.g. "2.40 MB"). We delete it here so the
+   * dashboard measures all downloads via HEAD requests like every other file,
+   * getting a precise byte count instead of an un-parseable string.
+   *
+   * We use _id / fileId to avoid colliding with Kartra's own id fields.
    */
+  const stampFiles = (files, postId) =>
+    (files || []).map((file, fi) => {
+      const stamped = {
+        ...file,
+        // Only generate fileId if the scraper didn't already provide one
+        fileId: file.fileId || `${postId}:f${fi}`,
+      };
+      // Drop the scraper's human-readable size string — it can't be used as
+      // bytes. The dashboard will measure the real size via HEAD request.
+      if (stamped.type === 'download' && typeof stamped.size === 'string') {
+        delete stamped.size;
+      }
+      return stamped;
+    });
+
+  const stampPost = (post, postId) => ({
+    ...post,
+    _id: postId,
+    id: String(post.id),
+    data: post.data
+      ? { ...post.data, files: stampFiles(post.data.files, postId) }
+      : post.data,
+  });
+
   const addIds = (memberships) =>
     memberships.map((membership, mi) => ({
       ...membership,
       categories: (membership.categories || []).map((category, ci) => ({
         ...category,
         _id: `cat-${mi}-${ci}`,
-        posts: (category.posts || []).map((post, pi) => ({
-          ...post,
-          _id: `post-${mi}-${ci}-${pi}`,
-          id: String(post.id),
-        })),
+        posts: (category.posts || []).map((post, pi) =>
+          stampPost(post, `post-${mi}-${ci}-${pi}`)),
         subcategories: (category.subcategories || []).map((sub, si) => ({
           ...sub,
           _id: `sub-${mi}-${ci}-${si}`,
-          posts: (sub.posts || []).map((post, pi) => ({
-            ...post,
-            _id: `post-${mi}-${ci}-${si}-${pi}`,
-            id: String(post.id),
-          })),
+          posts: (sub.posts || []).map((post, pi) =>
+            stampPost(post, `post-${mi}-${ci}-${si}-${pi}`)),
         })),
       })),
     }));

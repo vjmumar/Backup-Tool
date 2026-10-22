@@ -42,7 +42,7 @@
 class BackupOrchestrator {
    constructor({ courses, selected, empties, writer, rootFolder,
       onProgress, onDone, onError, onFileStatus, getFileStatus,
-      resumeAtPostId }) {
+      resumeAtPostId, retryPostId }) {
       // First, the course data and selection state from the dashboard
       this.courses = courses;
       this.selected = selected;
@@ -70,6 +70,10 @@ class BackupOrchestrator {
       // _findResumePoint entirely. Used by the per-lesson retry button so only
       // the retried lesson runs, not everything from the first failed file.
       this.resumeAtPostId = resumeAtPostId || null;
+
+      // Optional: when set, _write skips "failed" files belonging to other posts.
+      // Used by per-lesson retry so only the targeted lesson is re-attempted.
+      this.retryPostId = retryPostId || null;
 
       // Then, progress and summary counters
       this.total = 0;
@@ -150,12 +154,14 @@ class BackupOrchestrator {
 
       // Skip files already successfully downloaded in a previous run
       const currentStatus = hasFileId ? this.getFileStatus(fileId) : undefined;
-      console.log("[write]", fileName, "| fileId:", fileId, "| status:", currentStatus);
+      // Already saved — skip silently (not counted in total, so don't touch done)
       if (hasFileId && currentStatus === "done") {
-         console.log("[orchestrator] skipping done file:", fileId);
-         this.done++;
          this.saved++;
-         this._report("done", { ...ctx, fileName });
+         return;
+      }
+      // Per-lesson retry: skip failed files that belong to a different lesson
+      // (not counted in total either, so don't touch done)
+      if (hasFileId && this.retryPostId && currentStatus === "failed" && String(ctx.lessonId) !== String(this.retryPostId)) {
          return;
       }
 
@@ -163,14 +169,17 @@ class BackupOrchestrator {
       this._report("downloading", { ...ctx, fileName });
 
       const result = await this.writer.write(path, sourceUrl);
-      this.done++;
+
+      // Only count CDN files (hasFileId) in done/saved/failed — blob writes
+      // like content.txt have no fileId and are not counted in this.total.
+      if (hasFileId) this.done++;
 
       if (result.ok) {
-         this.saved++;
+         if (hasFileId) this.saved++;
          if (hasFileId) this.onFileStatus(fileId, "done");
          this._report("done", { ...ctx, fileName });
       } else {
-         this.failed++;
+         if (hasFileId) this.failed++;
          if (hasFileId) this.onFileStatus(fileId, "failed", result.error);
          const failKey = ctx.lessonId || ctx.emptyId;
          if (failKey) {
@@ -233,7 +242,17 @@ class BackupOrchestrator {
       try {
          // First, build the full flat list of write tasks
          const queue = this._buildQueue();
-         this.total = queue.filter((t) => !t._isSentinel).length;
+         // Count only tasks that _write will actually attempt (not already "done"
+         // and not skipped by retryPostId), so the progress bar reflects real work.
+         this.total = queue.filter((t) => {
+            if (t._isSentinel) return false;
+            const fid = t._fileId;
+            if (!fid) return false;
+            const status = this.getFileStatus(fid);
+            if (status === "done") return false;
+            if (this.retryPostId && status === "failed" && String(t._lessonId) !== String(this.retryPostId)) return false;
+            return true;
+         }).length;
          this._report("downloading", { courseId: "", fileName: "" });
 
          // Set up a cancel promise — resolves immediately when cancel() is called
@@ -280,7 +299,10 @@ class BackupOrchestrator {
       const tasks = [];
 
       const push = (path, url, ctx, fileName, fileId) => {
-         tasks.push(() => this._write(path, url, ctx, fileName, fileId));
+         const t = () => this._write(path, url, ctx, fileName, fileId);
+         t._fileId = fileId;
+         t._lessonId = ctx.lessonId;
+         tasks.push(t);
       };
 
       // Sentinel tasks fire after all files for a lesson — not counted in total
@@ -411,14 +433,10 @@ class BackupOrchestrator {
             // resume post — they are fully done. From the resume post onward,
             // run everything normally (_write skips individual done files).
 
-            let idx = 1;
-            const pad = Math.max(2, String(selPosts.length).length);
             let passedResumeLesson = !isResumeCat || rp.postId === null;
-            // postId === null means the failure was a category-level file,
-            // so all lessons in this category still need to run.
 
             for (const post of selPosts) {
-               const lessonName = `${String(idx++).padStart(pad, "0")} - ${this._safe(post.title)}`;
+               const lessonName = this._safe(post.title);
                const lessonPath = `${catPath}${lessonName}/`;
                const lessonCtx = { courseId: course.id, categoryId: category.id, lessonId: post.id, lessonTitle: post.title };
 

@@ -1,48 +1,49 @@
 /**
  * KartraOrchestrator — orchestrator.js
  *
- * Walks selected memberships, builds the folder/file paths per the Kartra
- * data spec, and calls writer.write(path, url) for every file.
+ * Walks selected memberships, builds the folder/file paths, and calls
+ * writer.write(path, url) for every file.
+ *
+ * Kartra structure:
+ *   membership
+ *     categories[]
+ *       posts[]          — posts directly in the category
+ *       subcategories[]
+ *         posts[]        — posts inside a subcategory
+ *
+ * All posts have the same shape regardless of where they sit:
+ *   post._id, post.name, post.data.files[], post.data.blocks[]
  *
  * Folder structure produced:
  *   <Membership name>/
  *     00 Welcome/
  *       01 Home/
- *         lesson.html
  *         content.txt
  *         lessonFiles/video-1.mp4
  *         lessonFiles/image-1.png
  *         downloads/filename.pdf
  *     01 <Category>/
- *       01 <Subcategory>/          ← only when category has subcategories
+ *       01 <Post>/               — direct category post
+ *         content.txt
+ *         lessonFiles/...
+ *       02 <Subcategory>/
  *         01 <Post>/
- *           lesson.html
  *           content.txt
  *           lessonFiles/...
- *           downloads/...
- *       02 <Post>/                 ← posts directly in category (no subcategory)
- *
- * Key Kartra rules:
- *   - categories[0] is always Welcome (id: 0) — rendered as "00 Welcome"
- *   - A category has either posts OR subcategories (render both just in case)
- *   - Duplicate post names in same folder are disambiguated by their number prefix
- *   - file.url for video is a Kartra player page — must be resolved to MP4 first
- *   - lesson.html and content.txt are written AFTER all media files for a post
- *   - admin_login_url is never present (stripped by scraper.js)
  *
  * writer interface:
  *   { write(path: string, url: string): Promise<{ ok: boolean, error?: string }> }
  *
  * onProgress({ done, total, status, courseId, categoryId, lessonId, lessonTitle, fileName })
- * onFileStatus(filePath, status, error?)
- * getFileStatus(filePath) → "done"|"failed"|"downloading"|undefined
+ * onFileStatus(fileId, status, error?)
+ * getFileStatus(fileId) → "done"|"failed"|"downloading"|undefined
  */
 
 class KartraOrchestrator {
    constructor({
       memberships, selected, writer, rootFolder,
       onProgress, onDone, onError, onFileStatus, getFileStatus,
-      resumeAtPostId,
+      resumeAtPostId, retryPostId,
    }) {
       this.memberships = memberships;
       this.selected = selected;
@@ -54,6 +55,7 @@ class KartraOrchestrator {
       this.onFileStatus = onFileStatus || (() => { });
       this.getFileStatus = getFileStatus || (() => undefined);
       this.resumeAtPostId = resumeAtPostId || null;
+      this.retryPostId = retryPostId || null;
 
       this.total = 0;
       this.done = 0;
@@ -75,41 +77,22 @@ class KartraOrchestrator {
 
    _safe = (name) => {
       let s = String(name || "Untitled")
-         .replace(/[/\\:*?"<>|]+/g, "-")
+         .replace(/[/\\:*?"<>|]/g, "-")
          .replace(/[\x00-\x1f]/g, "")
-         .replace(/[-.\s]+$/, "")
+         .replace(/\.+$/, "")
+         .replace(/\s+$/, "")
          .replace(/\s+/g, " ")
          .trim();
       if (/^(CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])$/i.test(s)) s = `_${s}`;
-      return s.slice(0, 120) || "Untitled";
+      return s.slice(0, 200) || "Untitled";
    };
 
-   _folderName = (index, name) =>
-      `${String(index).padStart(2, "0")} ${this._safe(name)}`;
+   _folderName = (name) => this._safe(name);
 
    _ext = (url, fallback = "") => {
       const base = url.split("?")[0].split("/").pop();
       const dot = base.lastIndexOf(".");
       return dot > 0 ? base.slice(dot).toLowerCase() : fallback;
-   };
-
-   // ─── VIDEO RESOLUTION ─────────────────────────────────────────────────────
-
-   /**
-    * Fetches the Kartra player page and extracts the real MP4 URL.
-    * Returns { url, name, duration } or null if not found.
-    */
-   _resolveVideo = async (playerUrl) => {
-      try {
-         const html = await fetch(playerUrl).then((r) => r.text());
-         const src = html.match(/sources:\s*\[\s*\{\s*src:\s*['"]([^'"]+)['"]/);
-         if (!src) return null;
-         const name = html.match(/name:\s*['"]([^'"]+)['"]\s*,\s*mediaid/)?.[1] || "";
-         const duration = Number(html.match(/duration:\s*(\d+)/)?.[1]) || 0;
-         return { url: src[1].replace(/\\\//g, "/"), name, duration };
-      } catch (_) {
-         return null;
-      }
    };
 
    // ─── PROGRESS ─────────────────────────────────────────────────────────────
@@ -120,108 +103,49 @@ class KartraOrchestrator {
 
    // ─── WRITE HELPER ─────────────────────────────────────────────────────────
 
-   _write = async (path, sourceUrl, ctx, fileName, filePath) => {
-      const hasPath = !!filePath;
+   _write = async (path, sourceUrl, ctx, fileName, fileId) => {
+      const hasFileId = !!fileId;
 
-      const currentStatus = hasPath ? this.getFileStatus(filePath) : undefined;
-      if (hasPath && currentStatus === "done") {
-         this.done++;
+      const currentStatus = hasFileId ? this.getFileStatus(fileId) : undefined;
+      // Already saved — skip silently (not counted in total, so don't touch done)
+      if (hasFileId && currentStatus === "done") {
          this.saved++;
-         this._report("done", { ...ctx, fileName });
+         return;
+      }
+      // Per-post retry: skip failed files that belong to a different post
+      // (not counted in total either, so don't touch done)
+      if (hasFileId && this.retryPostId && currentStatus === "failed" && ctx.lessonId !== this.retryPostId) {
          return;
       }
 
-      if (hasPath) this.onFileStatus(filePath, "downloading");
+      if (hasFileId) this.onFileStatus(fileId, "downloading");
       this._report("downloading", { ...ctx, fileName });
 
       const result = await this.writer.write(path, sourceUrl);
-      this.done++;
+
+      // Only count CDN files (hasFileId) in done/saved/failed — blob writes
+      // like content.txt have no fileId and are not counted in this.total.
+      if (hasFileId) this.done++;
 
       if (result.ok) {
-         this.saved++;
-         if (hasPath) this.onFileStatus(filePath, "done");
+         if (hasFileId) this.saved++;
+         if (hasFileId) this.onFileStatus(fileId, "done");
          this._report("done", { ...ctx, fileName });
       } else {
-         this.failed++;
-         if (hasPath) this.onFileStatus(filePath, "failed", result.error);
+         if (hasFileId) this.failed++;
+         if (hasFileId) this.onFileStatus(fileId, "failed", result.error);
          const failKey = ctx.lessonId;
          if (failKey) this._lessonFails.set(failKey, (this._lessonFails.get(failKey) || 0) + 1);
          this._report("failed", { ...ctx, fileName, error: result.error });
       }
    };
 
-   // ─── LESSON HTML BUILDER ──────────────────────────────────────────────────
-
-   /**
-    * Builds an offline-readable lesson.html from the post's blocks.
-    * Each block type is rendered per the Kartra spec.
-    *
-    * @param {string} title   Post name
-    * @param {Block[]} blocks  data.blocks from the post
-    * @param {LessonFile[]} files  data.files — needed to resolve file.path by index
-    * @returns {string}  Full HTML document
-    */
-   _buildLessonHtml = (title, blocks, files) => {
-      const esc = (t) => String(t ?? "").replace(/[&<>"']/g, (c) =>
-         ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
-
-      const renderBlock = (block) => {
-         switch (block.type) {
-            case "text": return block.html || "";
-            case "video": {
-               const file = files[block.fileIndex];
-               // file.path is already updated to the real filename by the time lesson.html is written
-               return file ? `<video src="./${esc(file.path)}" controls style="max-width:100%"></video>` : "";
-            }
-            case "image": {
-               const file = files[block.fileIndex];
-               return file ? `<img src="./${esc(file.path)}" alt="" style="max-width:100%">` : "";
-            }
-            case "audio": {
-               const file = files[block.fileIndex];
-               return file ? `<audio src="./${esc(file.path)}" controls></audio>` : "";
-            }
-            case "download": {
-               const file = files[block.fileIndex];
-               if (!file) return "";
-               const name = file.name || file.path.split("/").pop();
-               return `<a href="./${esc(file.path)}" download>${esc(name)}</a>`;
-            }
-            case "embed":
-               return `<p><a href="${esc(block.url)}" target="_blank" rel="noopener noreferrer">▶ View embedded content: ${esc(block.url)}</a></p>`;
-            case "divider":
-               return "<hr>";
-            default:
-               return "";
-         }
-      };
-
-      const body = (blocks || []).map(renderBlock).filter(Boolean).join("\n");
-
-      return `<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<title>${esc(title)}</title>
-<style>
-  body { max-width: 760px; margin: 40px auto; padding: 0 20px; font-family: system-ui, sans-serif; font-size: 16px; line-height: 1.6; color: #1a1a1a; }
-  h1 { font-size: 1.6em; margin-bottom: 1em; }
-  img, video { display: block; margin: 1em 0; }
-  audio { display: block; margin: 1em 0; width: 100%; }
-  a { color: #0070f3; }
-  hr { border: none; border-top: 1px solid #ddd; margin: 2em 0; }
-</style>
-</head>
-<body>
-<h1>${esc(title)}</h1>
-${body}
-</body>
-</html>`;
-   };
+   // ─── CONTENT TXT ──────────────────────────────────────────────────────────
 
    /**
     * Builds a plain-text content.txt from the post's blocks.
+    * Kartra posts have blocks[] instead of a body string.
+    * Text blocks → "text1: ...", embed blocks → "text1: embed: <url>".
     */
    _buildContentTxt = (title, blocks) => {
       let textIdx = 0;
@@ -240,6 +164,10 @@ ${body}
 
    // ─── RESUME ───────────────────────────────────────────────────────────────
 
+   /**
+    * Walks memberships in queue order and returns the position of the first
+    * file whose status is "failed". Returns null when nothing failed.
+    */
    _findResumePoint = () => {
       for (const membership of this.memberships) {
          for (const cat of membership.categories) {
@@ -250,7 +178,8 @@ ${body}
 
             for (const post of allPosts) {
                for (const file of (post.data?.files || [])) {
-                  if (file.path && this.getFileStatus(file.path) === "failed") {
+                  const key = file.fileId;
+                  if (key && this.getFileStatus(key) === "failed") {
                      return { membershipId: membership.id, catId: cat._id, postId: post._id };
                   }
                }
@@ -264,8 +193,18 @@ ${body}
 
    _run = async () => {
       try {
-         const queue = await this._buildQueue();
-         this.total = queue.filter((t) => !t._isSentinel).length;
+         const queue = this._buildQueue();
+         // Count only tasks that _write will actually attempt (not already "done"
+         // and not skipped by retryPostId), so the progress bar reflects real work.
+         this.total = queue.filter((t) => {
+            if (t._isSentinel) return false;
+            const fid = t._fileId;
+            if (!fid) return false;
+            const status = this.getFileStatus(fid);
+            if (status === "done") return false;
+            if (this.retryPostId && status === "failed" && t._lessonId !== this.retryPostId) return false;
+            return true;
+         }).length;
          this._report("downloading", { courseId: "", fileName: "" });
 
          const cancelPromise = new Promise((resolve) => { this._cancelResolve = resolve; });
@@ -284,11 +223,17 @@ ${body}
       }
    };
 
-   _buildQueue = async () => {
+   // ─── BUILD QUEUE ──────────────────────────────────────────────────────────
+
+   _buildQueue = () => {
       const tasks = [];
 
-      const push = (path, url, ctx, fileName, filePath) =>
-         tasks.push(() => this._write(path, url, ctx, fileName, filePath));
+      const push = (path, url, ctx, fileName, fileId) => {
+         const t = () => this._write(path, url, ctx, fileName, fileId);
+         t._fileId = fileId;
+         t._lessonId = ctx.lessonId;
+         tasks.push(t);
+      };
 
       const pushBlob = (path, text, ctx, fileName) =>
          tasks.push(async () => {
@@ -298,16 +243,10 @@ ${body}
             URL.revokeObjectURL(blobUrl);
          });
 
-      const pushHtml = (path, html, ctx, fileName) =>
-         tasks.push(async () => {
-            const blob = new Blob([html], { type: "text/html;charset=utf-8" });
-            const blobUrl = URL.createObjectURL(blob);
-            await this._write(path, blobUrl, ctx, fileName, null);
-            URL.revokeObjectURL(blobUrl);
-         });
-
       const pushSentinel = (fn) => {
-         const s = fn; s._isSentinel = true; tasks.push(s);
+         const s = fn;
+         s._isSentinel = true;
+         tasks.push(s);
       };
 
       // Find resume point
@@ -338,79 +277,79 @@ ${body}
          const memPath = `${root}${this._safe(memName)}/`;
          const memCtx = { courseId: membership.id };
 
-         let catIndex = 0; // 0 = Welcome, then 1, 2, 3…
+         // Resume check at membership level — skip if entirely before resume point
+         const isResumeMem = rp && rp.membershipId === membership.id;
+         const beforeResumeMem = rp && !isResumeMem && (() => {
+            for (const m of this.memberships) {
+               if (m.id === rp.membershipId) return false;
+               if (m.id === membership.id) return true;
+            }
+            return false;
+         })();
+         if (beforeResumeMem) continue;
 
          for (const cat of membership.categories) {
             const isWelcome = cat.id === 0;
-            const catFolder = this._folderName(catIndex, cat.name || "Category");
+            const catFolder = this._folderName(cat.name || "Category");
             const catPath = `${memPath}${catFolder}/`;
             const catCtx = { courseId: membership.id, categoryId: cat._id };
-            catIndex++;
 
-            // All selectable posts in this category
+            // Collect all selected posts in this category (direct + subcategory)
             const directPosts = (cat.posts || []).filter((p) => this.selected.has(p._id));
             const subPosts = (cat.subcategories || []).flatMap((s) =>
                (s.posts || []).filter((p) => this.selected.has(p._id)));
             if (!directPosts.length && !subPosts.length) continue;
 
-            // Resume check
+            // Resume check at category level
             const isResumeCat = rp && rp.catId === cat._id;
-            const beforeResume = rp && !isResumeCat &&
-               (() => {
-                  for (const c of this.memberships.flatMap((m) => m.categories)) {
+            const beforeResumeCat = rp && !isResumeCat && (() => {
+               for (const m of this.memberships) {
+                  if (m.id !== rp.membershipId && m.id !== membership.id) continue;
+                  for (const c of m.categories) {
                      if (c._id === rp.catId) return false;
                      if (c._id === cat._id) return true;
                   }
-                  return false;
-               })();
-            if (beforeResume) continue;
+               }
+               return false;
+            })();
+            if (beforeResumeCat) continue;
 
-            // ── Direct posts (category has posts, no subcategories) ───────────
+            // ── Direct posts ──────────────────────────────────────────────────
+            // passedResumePost is shared across direct posts AND subcategories so
+            // once the resume post is found in any section, all subsequent posts
+            // (including those in later subcategories) are included.
+            let passedResumePost = !rp || !isResumeCat || rp.postId === null;
+
             if (directPosts.length) {
-               let postIndex = isWelcome ? 0 : 1;
-               let passedResume = !rp || !isResumeCat || rp.postId === null;
-
                for (const post of directPosts) {
-                  if (!passedResume && post._id === rp.postId) passedResume = true;
-                  if (!passedResume) { postIndex++; continue; }
+                  if (!passedResumePost && post._id === rp.postId) passedResumePost = true;
+                  if (!passedResumePost) continue;
 
-                  const postFolder = this._folderName(postIndex, post.name || "Post");
+                  const postFolder = this._folderName(post.name || "Post");
                   const postPath = `${catPath}${postFolder}/`;
                   const postCtx = { courseId: membership.id, categoryId: cat._id, lessonId: post._id, lessonTitle: post.name };
-                  postIndex++;
 
-                  // Clone files array so we can mutate path for videos
-                  const files = (post.data?.files || []).map((f) => ({ ...f }));
-
-                  await this._pushPostTasks({ tasks, push, pushBlob, pushHtml, pushSentinel, post, files, postPath, postCtx });
+                  this._pushPostTasks({ push, pushBlob, pushSentinel, post, postPath, postCtx });
                }
             }
 
             // ── Subcategories ─────────────────────────────────────────────────
-            let subIndex = 1;
             for (const sub of (cat.subcategories || [])) {
                const selSubPosts = (sub.posts || []).filter((p) => this.selected.has(p._id));
-               if (!selSubPosts.length) { subIndex++; continue; }
+               if (!selSubPosts.length) continue;
 
-               const subFolder = this._folderName(subIndex, sub.name || "Subcategory");
+               const subFolder = this._folderName(sub.name || "Subcategory");
                const subPath = `${catPath}${subFolder}/`;
-               subIndex++;
-
-               let postIndex = 1;
-               let passedResume = !rp || rp.catId !== cat._id;
 
                for (const post of selSubPosts) {
-                  if (!passedResume && post._id === rp.postId) passedResume = true;
-                  if (!passedResume) { postIndex++; continue; }
+                  if (!passedResumePost && post._id === rp.postId) passedResumePost = true;
+                  if (!passedResumePost) continue;
 
-                  const postFolder = this._folderName(postIndex, post.name || "Post");
+                  const postFolder = this._folderName(post.name || "Post");
                   const postPath = `${subPath}${postFolder}/`;
                   const postCtx = { courseId: membership.id, categoryId: sub._id, lessonId: post._id, lessonTitle: post.name };
-                  postIndex++;
 
-                  const files = (post.data?.files || []).map((f) => ({ ...f }));
-
-                  await this._pushPostTasks({ tasks, push, pushBlob, pushHtml, pushSentinel, post, files, postPath, postCtx });
+                  this._pushPostTasks({ push, pushBlob, pushSentinel, post, postPath, postCtx });
                }
             }
          }
@@ -419,52 +358,41 @@ ${body}
       return tasks;
    };
 
+   // ─── POST TASKS ───────────────────────────────────────────────────────────
+
    /**
-    * Pushes all write tasks for one post (files + lesson.html + content.txt).
-    * Videos are resolved to MP4 URLs here before being pushed.
-    * lesson.html is written via a sentinel AFTER all file tasks for the post.
+    * Pushes all write tasks for one post (files + content.txt sentinel).
+    * content.txt is written after all files for the post are done.
     */
-   _pushPostTasks = async ({ tasks, push, pushBlob, pushHtml, pushSentinel, post, files, postPath, postCtx }) => {
-      // Resolve video URLs now (async, before building queue tasks)
-      for (const file of files) {
-         if (file.type !== "video") continue;
-         const resolved = await this._resolveVideo(file.url);
-         if (resolved?.url) {
-            // Update path to use the real filename with correct extension
-            const ext = this._ext(resolved.url, ".mp4");
-            const baseName = this._safe(resolved.name || file.path.split("/").pop().replace(/\.[^.]+$/, ""));
-            file.resolvedUrl = resolved.url;
-            file.path = `${file.path.split("/")[0]}/${baseName}${ext}`;
+   _pushPostTasks = ({ push, pushBlob, pushSentinel, post, postPath, postCtx }) => {
+      // All file types (video, image, audio, download) go through the same push()
+      // The scraper returns direct URLs for all types — no resolution step needed.
+      for (const file of (post.data?.files || [])) {
+         if (!file.url || !file.path) continue;
+         // Use the real filename from file.name when available; fall back to
+         // the path basename. Preserve the extension from the URL if file.name
+         // has none (e.g. scraper sets name without extension).
+         let fileName;
+         if (file.name) {
+            const safeName = this._safe(file.name);
+            const hasExt = safeName.includes(".");
+            fileName = hasExt ? safeName : safeName + this._ext(file.url);
+         } else {
+            fileName = file.path.split("/").pop();
          }
+         const dir = file.path.includes("/") ? file.path.slice(0, file.path.lastIndexOf("/") + 1) : "";
+         push(`${postPath}${dir}${fileName}`, file.url, postCtx, fileName, file.fileId || null);
       }
 
-      // Push file tasks
-      for (const file of files) {
-         if (!file.url) continue;
-         const destPath = `${postPath}${file.path}`;
-         const srcUrl = file.resolvedUrl || file.url;
-         push(destPath, srcUrl, postCtx, file.path.split("/").pop(), file.path);
-      }
-
-      // Sentinel — writes lesson.html and content.txt after all files are done
-      // Uses the (possibly updated) file.path values so links are correct
+      // Sentinel — writes content.txt after all files for this post complete
       pushSentinel(async () => {
          const hasFails = (this._lessonFails.get(post._id) || 0) > 0;
 
-         const lessonHtml = this._buildLessonHtml(post.name || "Post", post.data?.blocks || [], files);
          const contentTxt = this._buildContentTxt(post.name || "Post", post.data?.blocks || []);
-
-         const blobHtml = new Blob([lessonHtml], { type: "text/html;charset=utf-8" });
-         const blobTxt = new Blob([contentTxt], { type: "text/plain;charset=utf-8" });
-
-         const urlHtml = URL.createObjectURL(blobHtml);
-         const urlTxt = URL.createObjectURL(blobTxt);
-
-         await this._write(`${postPath}lesson.html`, urlHtml, postCtx, "lesson.html", null);
-         await this._write(`${postPath}content.txt`, urlTxt, postCtx, "content.txt", null);
-
-         URL.revokeObjectURL(urlHtml);
-         URL.revokeObjectURL(urlTxt);
+         const blob = new Blob([contentTxt], { type: "text/plain;charset=utf-8" });
+         const blobUrl = URL.createObjectURL(blob);
+         await this._write(`${postPath}content.txt`, blobUrl, postCtx, "content.txt", null);
+         URL.revokeObjectURL(blobUrl);
 
          this._report(hasFails ? "lesson-failed" : "lesson-done", postCtx);
       });

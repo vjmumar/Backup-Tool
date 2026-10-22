@@ -1,26 +1,21 @@
 /**
  * drive-backup.js — Google Drive backup writer
  *
- * Implements the writer interface expected by BackupOrchestrator:
+ * Implements the writer interface expected by KartraOrchestrator:
  *   { write(path, url): Promise<{ ok, error? }> }
  *
  * Each write sends a "drive-upload-file" message to background/drive.js,
  * which resolves the folder hierarchy in Drive (creating any missing folders),
  * then streams the source URL response body directly into a resumable Drive
  * upload — no JS-side buffering of file bytes.
- *
- * Path format produced by BackupOrchestrator:
- *   "Kajabi Backup/Course/Category/01 - Lesson/media/video.mp4"
- *   → Drive: My Drive > Kajabi Backup > Course > … > video.mp4
  */
 
 class DriveBackup {
-   constructor({ courses, selected, empties, rootFolder,
+   constructor({ memberships, selected, rootFolder,
       onProgress, onDone, onError, onFileStatus, getFileStatus,
-      resumeAtPostId }) {
-      this.courses = courses;
+      resumeAtPostId, retryPostId }) {
+      this.memberships = memberships;
       this.selected = selected;
-      this.empties = empties;
       this.rootFolder = rootFolder;
       this.onProgress = onProgress || (() => { });
       this.onDone = onDone || (() => { });
@@ -28,18 +23,15 @@ class DriveBackup {
       this.onFileStatus = onFileStatus || (() => { });
       this.getFileStatus = getFileStatus || (() => undefined);
       this.resumeAtPostId = resumeAtPostId || null;
+      this.retryPostId = retryPostId || null;
       this._run();
    }
 
    // ─── WRITER ──────────────────────────────────────────────────────────────────
 
    /**
-    * The writer object passed to BackupOrchestrator.
-    *
+    * The writer object passed to KartraOrchestrator.
     * Sends each file to background/drive.js via "drive-upload-file".
-    * The background resolves the Drive folder path, fetches the source URL,
-    * and streams the response body into a resumable Drive upload session.
-    *
     * Retries up to 3 times on transient errors (rate limits, server errors).
     */
    _writer = {
@@ -89,11 +81,10 @@ class DriveBackup {
             );
          }
 
-         // Then, run the backup using the shared orchestrator with the Drive writer
-         this._orchestrator = new BackupOrchestrator({
-            courses: this.courses,
+         // Then, run the backup using the orchestrator with the Drive writer
+         this._orchestrator = new KartraOrchestrator({
+            memberships: this.memberships,
             selected: this.selected,
-            empties: this.empties,
             rootFolder: this.rootFolder,
             writer: this._writer,
             onFileStatus: this.onFileStatus,
@@ -102,6 +93,7 @@ class DriveBackup {
             onDone: this.onDone,
             onError: this.onError,
             resumeAtPostId: this.resumeAtPostId,
+            retryPostId: this.retryPostId,
          });
 
       } catch (error) {

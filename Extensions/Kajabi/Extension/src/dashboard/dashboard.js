@@ -134,7 +134,7 @@ class CourseDashboard {
             return;
          }
          data.entries.forEach(([fileId, status]) => {
-            if (this._fileIndex?.has(fileId)) {
+            if (fileId.startsWith("lesson:") || this._fileIndex?.has(fileId)) {
                this.fileStatus.set(fileId, status === "downloading" ? "failed" : status);
             }
          });
@@ -203,17 +203,43 @@ class CourseDashboard {
    // ─── MEASURING ───────────────────────────────────────────────────────────────
 
    _probeSize = async (url) => {
-      const controller = new AbortController();
-      try {
-         const res = await fetch(url, { headers: { Range: "bytes=0-0" }, signal: controller.signal });
-         if (res.status === 429 || res.status >= 500) return { retry: true };
-         if (res.status !== 200 && res.status !== 206) return { size: null };
-         const range = res.headers.get("Content-Range");
-         const total = range ? Number(range.split("/")[1]) : Number(res.headers.get("Content-Length"));
-         return { size: Number.isFinite(total) && total > 0 ? total : null };
-      } finally {
-         controller.abort();
+      const probe = async (headers) => {
+         try {
+            const res = await fetch(url, { headers });
+            if (res.status === 429 || res.status >= 500) return { retry: true };
+            if (res.status !== 200 && res.status !== 206) return { size: null };
+
+            // Content-Range "bytes 0-0/<total>" is the most reliable source.
+            const range = res.headers.get("Content-Range");
+            if (range) {
+               const total = Number(range.split("/").pop().trim());
+               if (Number.isFinite(total) && total > 0) return { size: total };
+            }
+
+            // No Content-Range — use Content-Length.
+            // On a 206 this is 1 (our range byte), so only trust it on 200.
+            if (res.status === 200) {
+               const len = Number(res.headers.get("Content-Length"));
+               if (Number.isFinite(len) && len > 0) return { size: len };
+            }
+
+            return { size: null };
+         } catch (_) {
+            return { size: null };
+         }
+      };
+
+      // 1-byte range first — Content-Range carries the real size.
+      // If Content-Range is missing, fall back to a plain GET which
+      // returns 200 + Content-Length.
+      const result = await probe({ Range: "bytes=0-0" });
+      if (result.retry) return result;
+      if (result.size === null) {
+         const fallback = await probe({});
+         if (fallback.retry) return { retry: true };
+         return fallback;
       }
+      return result;
    };
 
    _getFileSize = async (url) => {
@@ -267,16 +293,28 @@ class CourseDashboard {
     * file.size in memory. The "scan" store is never written by this method.
     */
    _measureAll = async () => {
-      // First, load cached sizes from the sizes store into file objects
+      // Set total first so the progress display is correct from the very first draw,
+      // before any IDB reads or HTTP requests start.
+      const { total } = this._collectMeasureWork();
+      this._measureTotal = total;
+      this._measureDone = 0;
+      this._schedule();
+
+      // Load cached sizes — collect all promises and await together so the cache
+      // is fully hydrated before _collectMeasureWork runs its "already sized" check.
+      const cacheLoads = [];
       this.model.forEach(({ course }) => {
-         const load = (files) => (files || []).forEach(async (file) => {
+         const load = (files) => (files || []).forEach((file) => {
             if (!file.fileId || file.size !== undefined) return;
-            const cached = await this._dbGet("sizes", file.fileId);
-            if (cached !== undefined) {
-               file.size = cached;
-               this._measureDone++;
-               this._schedule();
-            }
+            cacheLoads.push(
+               this._dbGet("sizes", file.fileId).then((cached) => {
+                  if (cached !== undefined) {
+                     file.size = cached;
+                     this._measureDone++;
+                     this._schedule();
+                  }
+               })
+            );
          });
          load(course.files);
          course.categories.forEach((cat) => {
@@ -284,13 +322,10 @@ class CourseDashboard {
             (cat.posts || []).forEach((post) => load(post.files));
          });
       });
+      await Promise.all(cacheLoads);
 
-      // Then, collect what still needs measuring after cache load
-      // Small delay to let async cache loads settle before counting
-      await new Promise((r) => setTimeout(r, 50));
-
-      const { todo, total, alreadyDone } = this._collectMeasureWork();
-      this._measureTotal = total;
+      // Re-collect after cache hydration — alreadyDone may have grown
+      const { todo, alreadyDone } = this._collectMeasureWork();
       this._measureDone = alreadyDone;
       this._schedule();
 
@@ -424,12 +459,14 @@ class CourseDashboard {
     */
    _lessonDownloadStatus = (post) => {
       const cdnFiles = (post.files || []).filter((f) => f.url && f.fileId);
-      if (!cdnFiles.length) return undefined;
+      // No CDN files — check the lesson-level status stamped when the sentinel fires
+      if (!cdnFiles.length) return this.fileStatus.get(`lesson:${post.id}`) ?? undefined;
       const statuses = cdnFiles.map((f) => this.fileStatus.get(f.fileId));
       if (statuses.some((s) => s === "downloading")) return "downloading";
       if (statuses.some((s) => s === "failed")) return "failed";
       if (statuses.every((s) => s === "done")) return "done";
-      return undefined;
+      // Also check lesson-level — all files done but sentinel not yet fired
+      return this.fileStatus.get(`lesson:${post.id}`) ?? undefined;
    };
 
    _lessonHtml = (l) => {
@@ -524,6 +561,14 @@ class CourseDashboard {
       });
       const folderInput = this.$("#root-folder");
       if (folderInput) folderInput.disabled = this._backupRunning;
+
+      const remeasureBtn = this.$("#btn-remeasure");
+      if (remeasureBtn) {
+         const busy = this._backupRunning || this._measuring ||
+            (this._measureTotal > 0 && this._measureDone < this._measureTotal);
+         remeasureBtn.disabled = busy;
+         remeasureBtn.title = busy ? "Measuring in progress…" : "Re-measure file sizes";
+      }
 
       // Keep the select-all checkbox in sync with the tree state
       const allUnits = this.model.flatMap((c) => this._courseUnits(c));
@@ -630,9 +675,10 @@ class CourseDashboard {
 
       // Finally, start the backup with resumeAtPostId so the orchestrator
       // jumps straight to this lesson without re-running anything before it.
+      // retryPostId tells the orchestrator to skip other lessons' failed files.
       const savedDest = (() => { try { return localStorage.getItem(LS_DEST_KEY); } catch (_) { return null; } })();
-      if (savedDest === "drive") this._onPickDrive({ resumeAtPostId: lessonId });
-      else this._onPickLocal({ resumeAtPostId: lessonId });
+      if (savedDest === "drive") this._onPickDrive({ resumeAtPostId: lessonId, retryPostId: lessonId });
+      else this._onPickLocal({ resumeAtPostId: lessonId, retryPostId: lessonId });
    };
 
    // ─── EVENTS ──────────────────────────────────────────────────────────────────
@@ -718,7 +764,8 @@ class CourseDashboard {
       });
       this.$("#drive-switch-account").addEventListener("click", async () => {
          this._hideDriveModal();
-         await this._connectDrive(true);
+         const ok = await this._connectDrive(true);
+         if (ok) this._showDriveModal();
       });
       this.$("#drive-continue").addEventListener("click", async () => {
          this._hideDriveModal();
@@ -864,12 +911,36 @@ class CourseDashboard {
       if (info.lessonId) {
          if (info.status === "downloading") {
             this.backupActiveLessonId = info.lessonId;
-         } else if (info.status === "lesson-done" || info.status === "lesson-failed") {
+         } else if (info.status === "lesson-done") {
             this.backupActiveLessonId = null;
+            // Mark the lesson itself as done so lessons with no CDN files still glow
+            this.fileStatus.set(`lesson:${info.lessonId}`, "done");
+            this._saveFileStatus();
+         } else if (info.status === "lesson-failed") {
+            this.backupActiveLessonId = null;
+            this.fileStatus.set(`lesson:${info.lessonId}`, "failed");
+            this._saveFileStatus();
          }
       }
       this._setBackupProgress(info);
       this._schedule();
+   };
+
+   /**
+    * After a backup finishes, opens every drawer that contains at least one
+    * failed lesson so the user can immediately see what needs to be retried.
+    */
+   _openFailedDrawers = () => {
+      this.model.forEach((c) => {
+         let courseHasFail = false;
+         c.categories.forEach((k) => {
+            const catHasFail = k.lessons.some(
+               (l) => this._lessonDownloadStatus(l.post) === "failed"
+            );
+            if (catHasFail) { this.open.add(k.id); courseHasFail = true; }
+         });
+         if (courseHasFail) this.open.add(c.id);
+      });
    };
 
    _makeOnDone = (dest) => (summary) => {
@@ -881,6 +952,7 @@ class CourseDashboard {
       // Don't clean up stuck files on cancel — the cancel handler already cleared everything for a fresh start
       if (!wasCancelled && !summary?.cancelled) {
          this._cleanupStuckDownloading();
+         this._openFailedDrawers();
       }
       this._draw();
       this._setBackupDone(summary, dest);
@@ -894,6 +966,7 @@ class CourseDashboard {
       this._backupRunning = false;
       if (!wasCancelled) {
          this._cleanupStuckDownloading();
+         this._openFailedDrawers();
       }
       this._draw();
       this._setBackupError(error);
@@ -901,7 +974,7 @@ class CourseDashboard {
 
    // ─── LOCAL DESTINATION ───────────────────────────────────────────────────────
 
-   _onPickLocal = async ({ resumeAtPostId = null } = {}) => {
+   _onPickLocal = async ({ resumeAtPostId = null, retryPostId = null } = {}) => {
       this._hideDestinationPicker();
 
       try { localStorage.setItem(LS_DEST_KEY, "local"); } catch (_) { }
@@ -928,6 +1001,7 @@ class CourseDashboard {
          onDone: this._makeOnDone("local"),
          onError: this._makeOnError(),
          resumeAtPostId,
+         retryPostId,
       });
    };
 
@@ -946,7 +1020,7 @@ class CourseDashboard {
       return true;
    };
 
-   _onPickDrive = async ({ resumeAtPostId = null } = {}) => {
+   _onPickDrive = async ({ resumeAtPostId = null, retryPostId = null } = {}) => {
       const ok = await this._connectDrive();
       if (!ok) return;
 
@@ -974,6 +1048,7 @@ class CourseDashboard {
          onDone: this._makeOnDone("drive"),
          onError: this._makeOnError(),
          resumeAtPostId,
+         retryPostId,
       });
    };
 
@@ -1008,6 +1083,19 @@ class CourseDashboard {
    };
 
    _setBackupDone = ({ saved, failed, cancelled } = {}, dest = "local") => {
+      // Only clear persisted status when there's nothing left to retry.
+      // Use the live fileStatus map (not just this run's failed count) so that
+      // a partial resume run that fixed some posts doesn't wipe the statuses of
+      // other posts that are still "failed" from a previous run.
+      const hasRemainingFails = [...this.fileStatus.values()].some((s) => s === "failed");
+      if (!cancelled && !hasRemainingFails) {
+         this.fileStatus.clear();
+         try {
+            localStorage.removeItem(LS_KEY);
+            localStorage.removeItem(LS_DEST_KEY);
+         } catch (_) { }
+      }
+
       const location = dest === "drive" ? "Google Drive" : "your Downloads folder";
       const detail = cancelled
          ? `Cancelled. ${saved} file${saved === 1 ? "" : "s"} saved before stopping.`
@@ -1061,10 +1149,72 @@ class CourseDashboard {
       this.$("#btn-backup").addEventListener("click", () => this._showDestinationPicker());
    };
 
+   // ─── RE-MEASURE ──────────────────────────────────────────────────────────────
+
+   _remeasure = async () => {
+      if (this._backupRunning || this._measuring) return;
+      this._measuring = true;
+
+      // Clear backup state so the UI resets to "Start backup" instead of
+      // showing "Resume backup" with stale file statuses from a previous run.
+      this.fileStatus.clear();
+      try {
+         localStorage.removeItem(LS_KEY);
+         localStorage.removeItem(LS_DEST_KEY);
+      } catch (_) { }
+      this._schedule();
+
+      try {
+         // Clear the sizes IDB store and wait for it before re-measuring
+         await new Promise((resolve) => {
+            this._openDb().then((db) => {
+               const tx = db.transaction("sizes", "readwrite");
+               tx.objectStore("sizes").clear();
+               tx.oncomplete = resolve;
+               tx.onerror = resolve;
+            }).catch(resolve);
+         });
+
+         // Reset size on every in-memory file object so _collectMeasureWork
+         // treats them all as unsized
+         this.model.forEach(({ course }) => {
+            const reset = (files) => (files || []).forEach((file) => { delete file.size; });
+            reset(course.files);
+            course.categories.forEach((cat) => {
+               reset(cat.files);
+               (cat.posts || []).forEach((post) => reset(post.files));
+            });
+         });
+
+         this._measureTotal = 0;
+         this._measureDone = 0;
+         this._schedule();
+         await this._measureAll();
+      } catch (err) {
+         console.error("[Kajabi Backup] _remeasure error", err);
+      } finally {
+         this._measuring = false;
+         this._schedule();
+      }
+   };
+
    // ─── INIT ────────────────────────────────────────────────────────────────────
 
    _start = async () => {
       this._initEvents();
+
+      // Sign-out and Re-measure buttons in the header
+      const actions = this.$("#top-actions");
+      if (actions) {
+         actions.innerHTML = `
+            <button class="btn" id="btn-remeasure" title="Re-measure file sizes">Re-measure</button>
+            <button class="btn" id="btn-sign-out" title="Sign out">Sign out</button>`;
+         this.$("#btn-remeasure")?.addEventListener("click", () => this._remeasure());
+         this.$("#btn-sign-out")?.addEventListener("click", async () => {
+            await chrome.runtime.sendMessage({ type: "auth-sign-out" });
+            window.close();
+         });
+      }
 
       // First, verify the session is still valid — show an expired state if not
       const me = await chrome.runtime.sendMessage({ type: "auth-get-me" }).catch(() => null);
@@ -1111,7 +1261,21 @@ class CourseDashboard {
       }
       this._loadFileStatus();
       this._draw();
-      this._measureAll();
+
+      // Kick off the initial size measurement.
+      // Set _measuring so _draw shows the progress note and disables the
+      // Re-measure button while workers are running. Use try/finally so the
+      // flag is always cleared even if _measureAll throws.
+      this._measuring = true;
+      this._draw();
+      try {
+         await this._measureAll();
+      } catch (err) {
+         console.error("[Kajabi Backup] initial measure error", err);
+      } finally {
+         this._measuring = false;
+         this._draw();
+      }
 
       // After the tree is drawn, prompt for resume if there's a previous run
       const savedDest = (() => { try { return localStorage.getItem(LS_DEST_KEY); } catch (_) { return null; } })();
