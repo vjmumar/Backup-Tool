@@ -86,7 +86,7 @@ export const inviteUser = async (
     await postmarkClient.sendEmailWithTemplate({
        From: "backuptool@bluemangoesmedia.com",
        To: email,
-       TemplateId: 48375191,
+       TemplateId: resolvedPlatform === "kartra" ? 48460351 : 48375191,
        TemplateModel: {
           email,
           name: name,
