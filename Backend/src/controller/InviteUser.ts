@@ -84,7 +84,7 @@ export const inviteUser = async (
     const setupUrl = resolvedPlatform === "kartra" ? appConfig?.kartraSetupLink : appConfig?.kajabiSetupLink;
 
     await postmarkClient.sendEmailWithTemplate({
-       From: "backuptool@bluemangoesmedia.com",
+       From: resolvedPlatform === "kartra" ? "support@backupmykartra.com" :"support@backupmykajabi.com",
        To: email,
        TemplateId: resolvedPlatform === "kartra" ? 48460351 : 48375191,
        TemplateModel: {
